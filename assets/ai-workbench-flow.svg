@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="630" viewBox="0 0 1000 630" role="img" aria-labelledby="title desc">
+<title id="title">LLM MCP 분석 워크벤치 구성 흐름</title><desc id="desc">모델 제공자와 도구 호출을 분리하고 실행 승인 후 결과 상태와 증거를 기록하는 구성 문서의 요약</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="#607078"/></marker></defs>
+<rect width="1000" height="630" fill="#f6f5f0"/>
+<g font-family="Malgun Gothic,Apple SD Gothic Neo,sans-serif" fill="#1b252d">
+<text x="40" y="53" font-size="14" letter-spacing="2" fill="#607078">MODEL AND TOOL SEPARATION</text>
+<text x="40" y="93" font-size="28" font-weight="700">모델과 도구 호출을 분리한 분석 흐름</text>
+<g fill="#fff" stroke="#cbd3c9"><rect x="40" y="140" width="270" height="130"/><rect x="365" y="140" width="270" height="130"/><rect x="690" y="140" width="270" height="130"/><rect x="690" y="335" width="270" height="145"/><rect x="365" y="335" width="270" height="145"/></g>
+<rect x="40" y="335" width="270" height="145" fill="#233f51"/>
+<g font-size="24" font-weight="700"><text x="65" y="182">CLI / TUI</text><text x="390" y="182">LLM Provider</text><text x="715" y="182">MCP Client</text><text x="715" y="382">범위와 승인</text><text x="390" y="382">도구 실행</text><text x="65" y="382" fill="#fff">결과와 증거</text></g>
+<g font-size="17" fill="#607078"><text x="65" y="221">입력과 실행 상태 확인</text><text x="390" y="221">Ollama / Qwen</text><text x="715" y="221">선택한 서버의 도구 노출</text><text x="715" y="421">호출별 권한 확인</text><text x="390" y="421">실패·반복 실행 처리</text></g>
+<g font-size="16" fill="#d5e1e5"><text x="65" y="420">성공 · 부분 성공 · 실패 · 불명</text><text x="65" y="449">기록 경로와 SHA-256</text></g>
+<g fill="none" stroke="#607078" stroke-width="2" marker-end="url(#arrow)"><path d="M310 205H350"/><path d="M635 205H675"/><path d="M825 270V320"/><path d="M690 407H650"/><path d="M365 407H325"/></g>
+<path d="M175 335V292H500V279" fill="none" stroke="#a6b3b7" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+<text x="40" y="550" font-size="17" fill="#607078">구성 문서에서 정리한 역할과 실행 흐름</text>
+<text x="40" y="581" font-size="15" fill="#607078">실행 결과를 분석에 활용하고, 기록으로 판단 근거를 연결합니다.</text>
+</g></svg>
