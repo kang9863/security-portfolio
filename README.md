@@ -122,7 +122,7 @@
 
 ## 최근 AI 구성과 팀 프로젝트
 
-기존 공개 문서 34개에 AI와 팀 프로젝트 기록 8개를 추가했다. 현재 전체는 보고서·학습 기록 33개, 치트시트 7개, 안내 문서 2개로 총 42개다. 문서 수는 독립 프로젝트나 취약점 발견 수를 의미하지 않는다.
+기존 공개 문서 34개에 AI와 팀 프로젝트 기록 7개를 추가했다. 현재 전체는 보고서·학습 기록 32개, 치트시트 7개, 안내 문서 2개로 총 41개다. 문서 수는 독립 프로젝트나 취약점 발견 수를 의미하지 않는다.
 
 - [OWASP Juice Shop 팀 프로젝트와 AI 도구 활용](reports/juice-shop-team-project.md)
 - [Multi LLM MCP 분석 워크벤치 구성](reports/multi-llm-mcp-workbench.md)
@@ -131,4 +131,3 @@
 - [AI 도구의 실행 상태와 증거 관리](reports/ai-execution-evidence.md)
 - [AI 역할 분담과 검토 흐름 설계](reports/ai-role-orchestration-design.md)
 - [AI 퀀트 오케스트레이터 구조 설계](reports/ai-quant-orchestrator-design.md)
-- [AI를 활용한 자료 통합과 포트폴리오 제작](reports/ai-assisted-portfolio-workflow.md)
