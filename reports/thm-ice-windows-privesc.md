@@ -1,0 +1,180 @@
+# THM ICE 라이트업 - Windows 후속 분석과 권한 상승
+
+> Meterpreter / UAC Bypass / migrate / SYSTEM / kiwi / credential dump
+
+---
+
+## 1. 개요
+
+THM ICE는 Windows 대상에서 초기 Meterpreter 세션을 얻은 뒤, 권한 상승과 후속 분석을 연습하는 실습이다. 이 문서는 exploit 자체보다 세션 획득 이후의 판단을 중심으로 정리했다.
+
+실습 노트에는 UAC 우회, `eventvwr` 기반 bypass 모듈, `migrate`, SYSTEM 프로세스 선택, `kiwi`를 통한 credential 확인 흐름이 남아 있었다. 공개 포트폴리오에서는 실제 IP, 계정, 비밀번호, 해시, flag는 제거하고, 어떤 순서로 확인했는지만 남긴다.
+
+---
+
+## 2. 대상 / 환경
+
+| 항목 | 내용 |
+| --- | --- |
+| 플랫폼 | TryHackMe |
+| 대상 | Windows 서버 |
+| 주요 도구 | Metasploit, Meterpreter, kiwi |
+| 핵심 주제 | UAC 우회, 프로세스 migrate, SYSTEM 권한, credential dump |
+
+---
+
+## 3. 진행 흐름 요약
+
+```text
+초기 Meterpreter 세션 획득
+-> 현재 권한과 integrity level 확인
+-> UAC로 인해 권한이 제한된 상태인지 판단
+-> bypassuac_eventvwr 모듈 검토
+-> 상승된 Meterpreter 세션 획득
+-> SYSTEM 권한 프로세스로 migrate
+-> kiwi 로드
+-> credential dump 가능성 확인
+-> 민감값 마스킹 후 보고서화
+```
+
+---
+
+## 4. 초기 세션 점검
+
+Meterpreter 세션을 얻은 뒤 바로 exploit을 추가로 실행하기보다, 현재 권한을 먼저 확인한다.
+
+```text
+getuid
+getprivs
+sysinfo
+ps
+```
+
+확인한 질문은 다음과 같다.
+
+- 현재 사용자가 관리자 그룹에 속하는가?
+- 현재 프로세스가 high integrity로 실행 중인가?
+- UAC 때문에 관리자 계정이어도 권한이 제한되어 있는가?
+- 대상 프로세스와 payload 아키텍처가 x86/x64 중 무엇인가?
+
+Windows에서는 관리자 그룹 계정으로 로그인해도 항상 최고 권한으로 실행되는 것은 아니다. UAC 때문에 기본 프로세스는 제한된 관리자 토큰으로 실행될 수 있다.
+
+---
+
+## 5. UAC 우회 판단
+
+노트에는 다음 모듈을 사용한 흐름이 남아 있었다.
+
+```text
+exploit/windows/local/bypassuac_eventvwr
+```
+
+`eventvwr.exe`는 Windows 이벤트 뷰어와 관련된 자동 상승 동작을 악용하는 UAC bypass 계열 기법이다. 이미 로컬 세션이 있는 상태에서 권한 상승을 시도하는 모듈이므로, 원격 RCE와는 성격이 다르다.
+
+```text
+초기 Meterpreter 세션
+-> 관리자 그룹 여부 확인
+-> UAC 제한 확인
+-> bypassuac_eventvwr 실행
+-> 상승된 Meterpreter 세션 획득
+```
+
+보고서에서 중요한 부분은 “UAC 우회 모듈을 썼다”가 아니라, 왜 UAC 우회가 필요한 상태였는지 설명하는 것이다.
+
+---
+
+## 6. 프로세스 migrate
+
+상승된 세션을 얻은 뒤에는 안정적인 SYSTEM 프로세스로 migrate를 고려했다.
+
+```text
+ps
+migrate PID
+```
+
+노트에는 `spoolsv.exe` 같은 SYSTEM 권한 프로세스를 선택한 이유가 정리되어 있었다.
+
+선택 기준:
+
+- SYSTEM 권한으로 실행 중인 프로세스인가?
+- 대상 아키텍처와 payload 아키텍처가 맞는가?
+- 오래 살아 있는 서비스 프로세스인가?
+- 현재 세션보다 안정적인가?
+
+`migrate`는 권한 상승 자체가 아니라 세션 안정화와 토큰 활용을 위한 후속 절차다. 프로세스를 잘못 고르면 세션이 끊길 수 있으므로, 권한과 아키텍처를 함께 확인해야 한다.
+
+---
+
+## 7. SYSTEM 권한 확인
+
+권한 상승 후 다시 현재 사용자를 확인한다.
+
+```text
+getuid
+whoami
+```
+
+예상 상태:
+
+```text
+NT AUTHORITY\SYSTEM
+```
+
+SYSTEM은 Windows 로컬 최상위 권한에 가깝기 때문에, 로컬 파일 접근, credential dump, 서비스 조작 등으로 영향도가 커진다.
+
+---
+
+## 8. Credential Dump 흐름
+
+노트에는 `kiwi` 사용 흐름이 남아 있었다.
+
+```text
+load kiwi
+creds_all
+```
+
+`kiwi`는 Meterpreter에서 Mimikatz 기능을 활용하는 확장이다. LSASS 메모리나 인증 관련 정보를 확인할 수 있기 때문에, 실제 환경에서는 매우 민감한 단계다.
+
+포트폴리오 공개 기준:
+
+- 실제 계정명은 필요할 때만 일반화
+- 비밀번호, 해시, 토큰은 공개하지 않음
+- dump 성공 여부보다 “왜 SYSTEM 권한이 필요한지”를 설명
+- 실제 서비스 대상에서는 허가 없이 절대 수행하지 않음
+
+---
+
+## 9. Windows 권한 모델에서 배운 점
+
+### UAC
+
+UAC는 관리자 계정이어도 기본적으로 제한된 토큰으로 프로세스를 실행하게 만든다. 그래서 관리자 그룹 계정이라고 해서 곧바로 모든 작업이 가능한 것은 아니다.
+
+### SeTakeOwnershipPrivilege
+
+노트에는 `SeTakeOwnershipPrivilege`도 정리되어 있었다. 이 권한은 파일이나 레지스트리 키 같은 객체의 소유권을 가져올 수 있는 권한이다. 소유자가 되면 ACL을 수정해 읽기/쓰기 권한을 확보할 수 있으므로, Windows LPE 분석에서 중요한 단서가 된다.
+
+### SYSTEM 프로세스
+
+SYSTEM 권한 프로세스로 migrate하면 세션 안정성과 권한 활용 범위가 커진다. 다만 무작정 아무 프로세스로 이동하는 것이 아니라, 권한, 아키텍처, 안정성을 보고 선택해야 한다.
+
+---
+
+## 10. 대응 방안
+
+- UAC를 끄는 방식보다 우회 가능한 자동 상승 경로를 줄인다.
+- 로컬 관리자 권한 계정 사용을 최소화한다.
+- LSASS 보호 정책과 Credential Guard를 적용한다.
+- Meterpreter/Mimikatz 계열 행위 탐지 룰을 적용한다.
+- 이벤트 로그와 EDR에서 비정상 process migration, credential dump 행위를 모니터링한다.
+- 서비스 계정과 관리자 계정의 재사용을 줄인다.
+
+---
+
+## 11. 학습한 점
+
+- Windows 침투는 exploit 이후부터가 중요하다.
+- 관리자 그룹 계정, high integrity, SYSTEM 권한은 서로 다르다.
+- UAC bypass는 로컬 세션이 있을 때 권한을 확장하는 절차로 이해해야 한다.
+- `migrate`는 세션 안정화와 권한 활용을 위한 단계이며, 프로세스 선택 기준이 필요하다.
+- credential dump 결과는 공개 포트폴리오에 직접 넣지 않는 것이 안전하다.

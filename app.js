@@ -1,19 +1,35 @@
 "use strict";
-const list=document.querySelector('#case-list');let cases=[];let loaded=false;
-const validFilters=['all','web','system','ai'];
-const initialCategory=new URLSearchParams(location.search).get('category');
-let activeFilter=validFilters.includes(initialCategory)?initialCategory:'all';
-function el(tag,className,text){const x=document.createElement(tag);if(className)x.className=className;if(text!==undefined)x.textContent=text;return x;}
-function render(filter='all'){list.replaceChildren();const selected=cases.filter(c=>filter==='all'||c.category===filter);document.querySelector('#case-count').textContent=`${selected.length}개 사례`;for(const c of selected){const a=el('a','case-row');a.href=`case.html?id=${encodeURIComponent(c.id)}`;a.append(el('span','case-number',c.number));const body=el('div');body.append(el('p','case-label',c.label),el('h3','',c.title),el('p','case-summary',c.summary));a.append(body);const tags=el('div','case-tags');for(const t of c.tags)tags.append(el('span','',t));a.append(tags);const arrow=el('span','case-arrow','↗');arrow.setAttribute('aria-hidden','true');a.append(arrow);list.append(a);}}
-function setFilter(filter,updateUrl=false){
-  activeFilter=validFilters.includes(filter)?filter:'all';
-  for(const button of document.querySelectorAll('[data-filter]')){const selected=button.dataset.filter===activeFilter;button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));}
-  if(updateUrl){const url=new URL(location.href);if(activeFilter==='all')url.searchParams.delete('category');else url.searchParams.set('category',activeFilter);url.hash='work';history.replaceState(null,'',url);}
-  if(loaded)render(activeFilter);
+const cards=Array.from(document.querySelectorAll('[data-doc-card]'));
+const search=document.querySelector('#report-search');
+const counter=document.querySelector('#report-count');
+const pageLabel=document.querySelector('#page-label');
+const previous=document.querySelector('#page-previous');
+const next=document.querySelector('#page-next');
+const empty=document.querySelector('#report-empty');
+const filters=Array.from(document.querySelectorAll('[data-category-filter]'));
+const types=Array.from(document.querySelectorAll('[data-type-filter]'));
+const allowed=['all','web','mobile','ad','pwn','reverse','detection','ai','training','meta'];
+const params=new URLSearchParams(location.search);
+let category=allowed.includes(params.get('category'))?params.get('category'):'all';
+let type=['all','report','cheatsheet','guide'].includes(params.get('type'))?params.get('type'):'all';
+let page=0;
+const pageSize=9;
+function update(reset=false,updateUrl=false){
+ if(reset)page=0;
+ const query=search.value.trim().normalize('NFKC').replace(/\s+/g,' ').toLocaleLowerCase();
+ const matched=cards.filter(card=>(category==='all'||card.dataset.tags.split(' ').includes(category))&&(type==='all'||card.dataset.type===type)&&(!query||card.dataset.search.normalize('NFKC').replace(/\s+/g,' ').toLocaleLowerCase().includes(query)));
+ const pageCount=Math.max(1,Math.ceil(matched.length/pageSize));page=Math.min(page,pageCount-1);
+ const visible=new Set(matched.slice(page*pageSize,(page+1)*pageSize));
+ for(const card of cards)card.hidden=!visible.has(card);
+ for(const button of filters){const selected=button.dataset.categoryFilter===category;button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));}
+ for(const button of types){const selected=button.dataset.typeFilter===type;button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));}
+ counter.textContent=matched.length+' / '+cards.length+'개 문서';pageLabel.textContent=(page+1)+' / '+pageCount;
+ previous.disabled=page===0;next.disabled=page===pageCount-1;empty.hidden=matched.length!==0;
+ if(updateUrl){const url=new URL(location.href);category==='all'?url.searchParams.delete('category'):url.searchParams.set('category',category);type==='all'?url.searchParams.delete('type'):url.searchParams.set('type',type);url.hash='reports';history.replaceState(null,'',url);}
 }
-setFilter(activeFilter);
-fetch('data.json').then(r=>{if(!r.ok)throw Error();return r.json();}).then(d=>{cases=d.cases;loaded=true;render(activeFilter);}).catch(()=>{const p=el('p','','사례를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.');list.replaceChildren(p);document.querySelector('#case-count').textContent='불러오기 실패';});
-for(const b of document.querySelectorAll('[data-filter]'))b.addEventListener('click',()=>setFilter(b.dataset.filter,true));
-for(const a of document.querySelectorAll('[data-category]'))a.addEventListener('click',event=>{event.preventDefault();setFilter(a.dataset.category,true);document.querySelector('#work').scrollIntoView({block:'start'});});
-const menu=document.querySelector('.menu-button'),nav=document.querySelector('#site-nav');menu.addEventListener('click',()=>{const open=menu.getAttribute('aria-expanded')!=='true';menu.setAttribute('aria-expanded',String(open));nav.classList.toggle('open',open);});for(const a of nav.querySelectorAll('a'))a.addEventListener('click',()=>{menu.setAttribute('aria-expanded','false');nav.classList.remove('open');});
-document.querySelector('#copy-email').addEventListener('click',async()=>{const status=document.querySelector('#copy-status');try{await navigator.clipboard.writeText('kms986334@gmail.com');status.textContent='이메일 주소를 복사했습니다.';}catch{status.textContent='이메일 주소를 선택해 복사해 주세요.';}});
+for(const button of filters)button.addEventListener('click',()=>{category=button.dataset.categoryFilter;update(true,true);});
+for(const button of types)button.addEventListener('click',()=>{type=button.dataset.typeFilter;update(true,true);});
+search.addEventListener('input',()=>update(true));
+document.querySelector('#reset-filters').addEventListener('click',()=>{category='all';type='all';search.value='';update(true,true);});
+previous.addEventListener('click',()=>{page--;update();});next.addEventListener('click',()=>{page++;update();});
+update();

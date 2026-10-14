@@ -1,0 +1,125 @@
+<h1 id="section-1">DreamHack 라이트업 — Dream Casino (MT19937 난수 예측)</h1>
+<hr>
+<h2 id="section-2">1. 개요</h2>
+<p>Dream Casino는 PHP의 <code>mt_rand()</code> 함수가 사용하는 Mersenne Twister(MT19937) 난수 생성기의<br>seed 값을 역추적하여 다음 난수를 예측하는 문제입니다.<br>충분한 난수 출력값을 수집하면 내부 상태를 복원하고 seed를 특정할 수 있습니다.</p>
+<hr>
+<h2 id="section-3">2. 문제 구조</h2>
+<pre><code>웹 카지노 게임 사이트
+  - 슬롯머신, 주사위 등 랜덤 결과 기반 게임
+  - PHP mt_rand()로 결과 생성
+  - 초기 seed: time() (현재 Unix timestamp)
+  - 잔액이 일정 이상이면 FLAG 지급
+</code></pre>
+<hr>
+<h2 id="section-4">3. 취약점 원리 — MT19937</h2>
+<h3 id="section-5">PHP mt_rand() 특성</h3>
+<ul>
+<li>PHP <code>mt_rand()</code>는 Mersenne Twister를 사용</li>
+<li>seed로 <code>time()</code>(Unix timestamp)을 사용하면 seed 범위가 제한됨 (초 단위)</li>
+<li>같은 seed에서 동일한 난수 시퀀스 생성 → <strong>예측 가능</strong></li>
+</ul>
+<h3 id="section-6">Seed 복원 방법</h3>
+<pre><code>방법 1: Seed Brute-force
+  - 요청 전후 수 초 범위의 timestamp를 모두 시도
+  - PHP로 동일한 시퀀스를 재현하여 실제 출력과 대조
+
+방법 2: php_mt_seed 도구 사용
+  - 난수 출력값을 입력하면 seed를 역산
+  - 도구: https://github.com/openwall/php_mt_seed
+</code></pre>
+<hr>
+<h2 id="section-7">4. 공격 흐름</h2>
+<h3 id="section-8">4.1 난수 출력값 수집</h3>
+<pre><code class="language-python">import requests
+
+url = "http://target/game"
+session = requests.Session()
+
+# 여러 번 게임 플레이하여 결과값 수집
+results = []
+for _ in range(10):
+    r = session.get(url + "/play")
+    results.append(r.json()["result"])
+
+print(results)
+# [3, 7, 2, 5, 1, 8, 4, 6, 3, 7]
+</code></pre>
+<h3 id="section-9">4.2 Seed Brute-force</h3>
+<pre><code class="language-python">import subprocess
+import time
+
+# 요청 시점 기준 ±10초 범위로 시도
+target_time = int(time.time())
+
+for seed in range(target_time - 10, target_time + 10):
+    # PHP로 시뮬레이션
+    php_code = f"&lt;?php mt_srand({seed}); for($i=0;$i&lt;10;$i++) echo mt_rand(1,8).',';"
+    output = subprocess.check_output(["php", "-r", php_code]).decode().strip(",").split(",")
+    
+    if output[:3] == [str(r) for r in results[:3]]:
+        print(f"Seed found: {seed}")
+        print(f"Next values: {output}")
+        break
+</code></pre>
+<h3 id="section-10">4.3 php_mt_seed 사용</h3>
+<pre><code class="language-bash"># 설치
+git clone https://github.com/openwall/php_mt_seed
+cd php_mt_seed &amp;&amp; make
+
+# 수집한 난수 첫 값으로 seed 역산
+./php_mt_seed &lt;첫번째_난수값&gt;
+# → Seed: 1706847231
+</code></pre>
+<h3 id="section-11">4.4 다음 난수 예측 → 베팅으로 잔액 증가</h3>
+<pre><code class="language-python">import subprocess
+
+seed = 1706847231  # 발견한 seed
+
+# 이미 소비된 난수 수만큼 건너뛰기
+php_code = f"""&lt;?php
+mt_srand({seed});
+for($i = 0; $i &lt; {len(results)}; $i++) mt_rand(1, 8);
+// 다음 10개 예측
+for($i = 0; $i &lt; 10; $i++) echo mt_rand(1, 8).',';
+"""
+
+next_values = subprocess.check_output(["php", "-r", php_code]).decode().strip(",").split(",")
+print("예측된 다음 결과:", next_values)
+</code></pre>
+<h3 id="section-12">4.5 예측값으로 베팅 반복 → 잔액 목표치 달성</h3>
+<pre><code class="language-python"># 예측한 값에 전액 베팅 반복
+for predicted in next_values:
+    r = session.post(url + "/bet", json={"choice": predicted, "amount": balance})
+    balance = r.json()["balance"]
+    print(f"잔액: {balance}")
+
+# 목표 잔액 달성 시 FLAG 요청
+r = session.get(url + "/flag")
+print(r.text)
+</code></pre>
+<hr>
+<h2 id="section-13">5. 대응 방안</h2>
+<pre><code class="language-php">// 취약 코드
+mt_srand(time());
+$result = mt_rand(1, 8);
+
+// 방어 코드
+// 1. 암호학적으로 안전한 난수 사용
+$result = random_int(1, 8);  // CSPRNG 사용
+
+// 2. 서버에서만 seed 관리, 클라이언트에 시퀀스 노출 최소화
+</code></pre>
+<ul>
+<li><strong><code>random_int()</code></strong>: PHP 7+ 에서 CSPRNG 기반 → 예측 불가</li>
+<li><strong>seed를 <code>time()</code>으로 설정 금지</strong>: 예측 가능한 시드 사용 지양</li>
+<li><strong>결과값 직접 노출 최소화</strong>: 패턴 수집 기회 제한</li>
+</ul>
+<hr>
+<h2 id="section-14">6. 학습한 점</h2>
+<ul>
+<li><code>mt_rand()</code>는 암호학적 안전성이 없음 — 결과값이 충분히 모이면 seed 역산 가능</li>
+<li><code>time()</code> seed는 요청 시간을 알면 범위가 수십 초 이내 → brute-force 현실적</li>
+<li><code>random_int()</code> vs <code>mt_rand()</code> 차이를 정확히 인지하는 것이 중요</li>
+<li>Gambling/Lottery 계열 웹앱에서 난수 예측 취약점은 실제 버그 바운티에서도 보고된 사례 있음</li>
+<li>PHP MT19937 seed 복원 도구(<code>php_mt_seed</code>)의 존재 — 이미 공개된 공격 도구</li>
+</ul>

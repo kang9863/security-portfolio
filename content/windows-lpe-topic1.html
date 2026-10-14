@@ -1,0 +1,151 @@
+<h1 id="section-1">Windows LPE Topic1 - 권한 모델 정리</h1>
+<h2 id="section-2">1. 개요</h2>
+<p>Windows LPE(Local Privilege Escalation)를 이해하려면 exploit 코드보다 먼저 Windows 권한 모델을 알아야 한다.
+이 문서는 사용자, 그룹, 토큰, 무결성 수준, UAC, 서비스 권한을 중심으로 로컬 권한 상승을 분석할 때 확인할
+기준을 정리한 것이다.</p>
+<h2 id="section-3">2. 핵심 개념</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>개념</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>SID</td>
+<td>사용자/그룹을 식별하는 고유 ID</td>
+</tr>
+<tr>
+<td>Access Token</td>
+<td>로그인한 사용자의 권한 정보가 담긴 객체</td>
+</tr>
+<tr>
+<td>Privilege</td>
+<td><code>SeImpersonatePrivilege</code> 같은 특수 권한</td>
+</tr>
+<tr>
+<td>Integrity Level</td>
+<td>Low / Medium / High / System 무결성 수준</td>
+</tr>
+<tr>
+<td>UAC</td>
+<td>관리자 계정도 기본적으로 낮은 권한 토큰으로 실행하게 만드는 보호 장치</td>
+</tr>
+<tr>
+<td>ACL</td>
+<td>객체에 누가 어떤 접근을 할 수 있는지 정하는 권한 목록</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-4">3. Access Token 관점</h2>
+<p>Windows에서 프로세스는 사용자의 Access Token을 가지고 실행된다. 토큰에는 사용자 SID, 그룹 SID, 권한,
+무결성 수준이 포함된다.</p>
+<pre><code class="language-cmd">whoami /user
+whoami /groups
+whoami /priv
+</code></pre>
+<p>확인할 항목:</p>
+<ul>
+<li>현재 사용자가 Administrators 그룹인지</li>
+<li>현재 프로세스가 Medium Integrity인지 High Integrity인지</li>
+<li><code>SeImpersonatePrivilege</code>, <code>SeAssignPrimaryTokenPrivilege</code> 같은 권한이 있는지</li>
+<li>권한이 있어도 Enabled 상태인지</li>
+</ul>
+<h2 id="section-5">4. UAC와 무결성 수준</h2>
+<p>관리자 계정으로 로그인했더라도 모든 프로세스가 곧바로 관리자 권한으로 실행되는 것은 아니다. UAC가 켜져 있으면
+기본 프로세스는 Medium Integrity로 실행되고, 승인된 관리자 작업만 High Integrity로 올라간다.</p>
+<pre><code class="language-text">관리자 계정 로그인
+  -&gt; 기본 프로세스: Medium Integrity
+  -&gt; UAC 승인 또는 auto-elevate 흐름
+  -&gt; High Integrity 프로세스
+  -&gt; SYSTEM 권한 서비스/프로세스와 상호작용 가능성 확인
+</code></pre>
+<p>THM ICE 실습에서 UAC 우회와 SYSTEM migrate를 같이 다룬 이유도 이 구조 때문이다. 이미 세션이 있어도
+현재 토큰이 낮으면 관리자 작업이나 credential dump가 제한될 수 있다.</p>
+<h2 id="section-6">5. Windows LPE 점검 루틴</h2>
+<pre><code class="language-text">현재 사용자와 그룹 확인
+  -&gt; token privilege 확인
+  -&gt; integrity level 확인
+  -&gt; writable service / registry / scheduled task 확인
+  -&gt; unquoted service path 확인
+  -&gt; weak folder permission 확인
+  -&gt; exploit 가능성보다 재현 가능한 권한 오남용 먼저 판단
+</code></pre>
+<p>주요 명령:</p>
+<pre><code class="language-cmd">whoami /priv
+whoami /groups
+net user %USERNAME%
+net localgroup administrators
+sc query
+icacls "C:\Path\To\Service"
+schtasks /query /fo LIST /v
+</code></pre>
+<p>PowerShell에서는 다음 항목을 확인한다.</p>
+<pre><code class="language-powershell">Get-Process -IncludeUserName
+Get-Service
+Get-Acl "C:\Path\To\Service"
+</code></pre>
+<h2 id="section-7">6. 자주 보는 권한 상승 후보</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>후보</th>
+<th>확인 포인트</th>
+<th>위험</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Weak Service Permission</td>
+<td>서비스 실행 파일 또는 설정 변경 가능</td>
+<td>SYSTEM 서비스 hijack</td>
+</tr>
+<tr>
+<td>Unquoted Service Path</td>
+<td>공백 포함 경로에 따옴표 없음</td>
+<td>중간 경로 실행 파일 삽입</td>
+</tr>
+<tr>
+<td>AlwaysInstallElevated</td>
+<td>MSI가 높은 권한으로 실행</td>
+<td>악성 MSI로 권한 상승</td>
+</tr>
+<tr>
+<td>SeImpersonatePrivilege</td>
+<td>토큰 가장 가능</td>
+<td>Potato 계열 공격 가능</td>
+</tr>
+<tr>
+<td>Writable Scheduled Task</td>
+<td>작업 파일/명령 변경 가능</td>
+<td>높은 권한 작업 탈취</td>
+</tr>
+<tr>
+<td>DLL Hijacking</td>
+<td>로드 경로에 쓰기 가능</td>
+<td>높은 권한 프로세스 DLL 교체</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-8">7. 분석 시 주의점</h2>
+<ul>
+<li>관리자 그룹 소속과 High Integrity는 다르다.</li>
+<li>권한 이름이 보여도 Disabled 상태면 바로 사용할 수 없을 수 있다.</li>
+<li>exploit suggester 결과는 후보일 뿐이며 OS 버전, 패치 상태, 권한 조건을 다시 확인해야 한다.</li>
+<li>포트폴리오에는 실제 해시나 credential dump 결과를 남기지 않는다.</li>
+<li>LPE는 “취약점 번호”보다 현재 토큰과 객체 권한의 관계를 설명하는 것이 중요하다.</li>
+</ul>
+<h2 id="section-9">8. 대응 방안</h2>
+<ul>
+<li>서비스 실행 파일과 폴더 ACL 최소 권한 적용</li>
+<li>서비스 경로에는 따옴표 사용</li>
+<li><code>AlwaysInstallElevated</code> 비활성화</li>
+<li>불필요한 특수 권한 제거</li>
+<li>관리자 계정과 일반 계정 분리</li>
+<li>EDR/로그에서 서비스 변경, 예약 작업 변경, 권한 상승 시도 모니터링</li>
+<li>정기적으로 <code>whoami /priv</code>, 서비스 ACL, 예약 작업, 레지스트리 설정 점검</li>
+</ul>
+<h2 id="section-10">9. 학습한 점</h2>
+<ul>
+<li>Windows 권한 상승은 “관리자냐 아니냐”보다 토큰, 무결성 수준, privilege, 객체 ACL을 함께 봐야 한다.</li>
+<li>UAC는 완전한 보안 경계는 아니지만, 실제 공격 흐름에서는 현재 세션의 권한 범위를 크게 좌우한다.</li>
+<li>SYSTEM 권한 획득은 exploit 하나로 끝나는 것이 아니라 서비스, 토큰, 프로세스 권한 관계를 이용하는 경우가 많다.</li>
+<li>웹/AD 실습과 마찬가지로 Windows LPE도 결국 “누가 어떤 객체에 어떤 권한을 가지고 있는가”를 추적하는 문제다.</li>
+</ul>

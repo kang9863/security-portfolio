@@ -1,0 +1,192 @@
+<h1 id="section-1">정찰 및 AD 공격 경로 정리</h1>
+<h2 id="section-2">1. 개요</h2>
+<p>이 문서는 Nmap 전체 포트 스캔에서 시작해 내부망/Active Directory 환경의 공격 표면을 분류하고, 계정 확보와 권한 경로 분석으로 이어지는 학습 흐름을 정리한 것입니다.</p>
+<p>실제 계정명, 도메인명, IP, 인증서, 해시, 키는 공개하지 않고 익명화합니다.</p>
+<h2 id="section-3">2. 분석 방법론</h2>
+<pre><code class="language-text">전체 포트 스캔
+-&gt; 서비스 식별
+-&gt; 웹/SMB/LDAP/Kerberos 분류
+-&gt; 계정 및 도메인 정보 수집
+-&gt; BloodHound 기반 권한 경로 분석
+-&gt; Kerberoasting 가능성 확인
+-&gt; Password Spraying 가능성 검토
+-&gt; SMB Share 탐색
+-&gt; 인증서/PFX 취급 가능성 검토
+-&gt; gMSA/권한 위임 경로 분석
+-&gt; 관리자 권한 획득 시나리오 정리
+</code></pre>
+<h2 id="section-4">3. 정찰</h2>
+<p>Nmap은 침투테스트의 시작점으로 사용했습니다.</p>
+<p>확인 항목:</p>
+<ul>
+<li>열려 있는 포트</li>
+<li>서비스 이름</li>
+<li>서비스 버전</li>
+<li>웹 서버 여부</li>
+<li>SMB 노출 여부</li>
+<li>LDAP/Kerberos 도메인 서비스 여부</li>
+<li>WinRM/PSWA 같은 원격 관리 서비스 여부</li>
+</ul>
+<p>예시 명령:</p>
+<pre><code class="language-bash">nmap -p- -T4 &lt;target&gt;
+nmap -sC -sV -oA nmap/result &lt;target&gt;
+</code></pre>
+<h2 id="section-5">4. 서비스 분류</h2>
+<p>스캔 결과는 다음 기준으로 분류합니다.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>서비스</th>
+<th>분석 목표</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>HTTP/HTTPS</td>
+<td>로그인, 파일 업로드, API, 정보 노출</td>
+</tr>
+<tr>
+<td>SMB</td>
+<td>공유 폴더, 익명 접근, 파일 내 계정 정보</td>
+</tr>
+<tr>
+<td>LDAP</td>
+<td>도메인 사용자, 그룹, 정책 정보</td>
+</tr>
+<tr>
+<td>Kerberos</td>
+<td>Kerberoasting, AS-REP Roasting 가능성</td>
+</tr>
+<tr>
+<td>WinRM/PSWA</td>
+<td>원격 명령 실행 가능성</td>
+</tr>
+<tr>
+<td>MSSQL</td>
+<td>DB 인증, 권한, xp_cmdshell 가능성</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-6">5. 우선순위 판단 기준</h2>
+<p>정찰 결과가 많을수록 바로 공격으로 넘어가기보다 우선순위를 정해야 합니다. 제가 AD 풀이를 복기하면서 잡은 기준은 다음과 같습니다.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>우선순위</th>
+<th>조건</th>
+<th>이유</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>인증 없이 읽을 수 있는 SMB/LDAP 정보</td>
+<td>계정명, 그룹, 파일 내부 비밀번호가 나올 수 있음</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Kerberos 관련 계정 노출</td>
+<td>AS-REP Roasting, Kerberoasting으로 이어질 수 있음</td>
+</tr>
+<tr>
+<td>3</td>
+<td>웹 로그인/PSWA/WinRM</td>
+<td>확보한 계정의 실제 접근 가능성을 검증할 수 있음</td>
+</tr>
+<tr>
+<td>4</td>
+<td>인증서/PFX/gMSA 파일</td>
+<td>AD에서 권한 상승 경로로 연결될 수 있음</td>
+</tr>
+<tr>
+<td>5</td>
+<td>BloodHound 경로</td>
+<td>단순 계정 탈취가 아니라 권한 관계를 설명할 수 있음</td>
+</tr>
+</tbody></table></div>
+<p>이 기준을 두면 스캔 결과가 단순 포트 목록으로 남지 않고, “어떤 서비스가 다음 단계의 단서가 되는지”를 보고서에 설명할 수 있습니다.</p>
+<h2 id="section-7">6. AD 공격 경로 분석</h2>
+<p>AD 환경에서는 단일 취약점보다 권한 관계가 중요합니다.</p>
+<p>분석 질문:</p>
+<ul>
+<li>현재 계정이 어떤 그룹에 속하는가?</li>
+<li>어떤 공유 폴더를 읽을 수 있는가?</li>
+<li>서비스 계정 해시를 얻을 수 있는가?</li>
+<li>패스워드 스프레이가 가능한 정책인가?</li>
+<li>BloodHound에서 권한 상승 경로가 보이는가?</li>
+<li>인증서나 gMSA 권한이 잘못 위임되어 있는가?</li>
+</ul>
+<h2 id="section-8">7. 대표 공격 경로 템플릿</h2>
+<p>실제 풀이에서 자주 보이는 경로는 다음처럼 정리할 수 있습니다.</p>
+<pre><code class="language-text">익명 LDAP 또는 SMB 열람
+-&gt; 사용자명/그룹/파일 정보 수집
+-&gt; AS-REP Roasting 또는 Kerberoasting
+-&gt; 해시 크랙 또는 계정 재사용 확인
+-&gt; BloodHound로 권한 관계 확인
+-&gt; WriteDACL / GenericAll / gMSA / 인증서 경로 검토
+-&gt; WinRM/PSWA/SMB를 통해 권한 확인
+</code></pre>
+<p>보고서에서는 이 흐름을 그대로 공격 단계처럼 나열하기보다, 각 단계에서 얻은 증거를 표로 남기는 편이 좋습니다.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>단계</th>
+<th>남길 증거</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>정찰</td>
+<td>포트/서비스/도메인명</td>
+</tr>
+<tr>
+<td>계정 후보</td>
+<td>사용자명 출처, 파일 경로, LDAP 쿼리 근거</td>
+</tr>
+<tr>
+<td>해시/티켓</td>
+<td>어떤 계정이 어떤 조건 때문에 roast 가능한지</td>
+</tr>
+<tr>
+<td>권한 관계</td>
+<td>BloodHound path, ACE, group membership</td>
+</tr>
+<tr>
+<td>원격 접속</td>
+<td>WinRM/PSWA/SMB 접근 가능 여부</td>
+</tr>
+<tr>
+<td>영향도</td>
+<td>어떤 시스템 또는 데이터까지 접근 가능한지</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-9">8. 위험도와 영향</h2>
+<p>가능한 영향:</p>
+<ul>
+<li>일반 계정 탈취</li>
+<li>내부 파일 공유 접근</li>
+<li>서비스 계정 해시 크랙</li>
+<li>도메인 권한 경로 노출</li>
+<li>관리자 권한 획득</li>
+<li>중요 시스템 접근</li>
+</ul>
+<h2 id="section-10">9. 보고서 작성 기준</h2>
+<p>실제 보고서 작성 시 다음을 분명히 구분합니다.</p>
+<ul>
+<li>발견한 서비스</li>
+<li>인증 없이 접근 가능한 정보</li>
+<li>인증 후 접근 가능한 정보</li>
+<li>권한 상승에 필요한 조건</li>
+<li>재현 절차</li>
+<li>비즈니스 영향</li>
+<li>대응 방안</li>
+</ul>
+<h2 id="section-11">10. 대응 체크리스트</h2>
+<ul>
+<li>불필요한 포트와 서비스 차단</li>
+<li>SMB 공유 권한 최소화</li>
+<li>LDAP 익명 조회 제한</li>
+<li>Kerberos 서비스 계정 비밀번호 강도 강화</li>
+<li>계정 잠금 정책과 MFA 적용</li>
+<li>BloodHound 기준 과도한 권한 관계 제거</li>
+<li>인증서 템플릿과 gMSA 권한 위임 점검</li>
+<li>로그 모니터링과 탐지 룰 적용</li>
+</ul>
+<h2 id="section-12">11. 학습한 점</h2>
+<p>AD 침투는 도구 하나로 끝나는 문제가 아니라, 정찰 결과를 권한 관계와 연결하는 과정입니다. Nmap 결과를 단순 포트 목록으로 끝내지 않고, 각 서비스가 다음 단계의 어떤 공격 경로로 이어지는지 설명할 수 있어야 합니다.</p>

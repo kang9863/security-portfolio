@@ -1,0 +1,77 @@
+<h1 id="section-1">Multi LLM MCP 분석 워크벤치 구성</h1>
+<p>Qwen 중심 CLI를 로컬 Ollama와 OpenAI-compatible 모델이 공통 MCP 계층을 사용하는 워크벤치로 구성·확장한 기록이다. 모델의 요청·응답 처리와 도구 연결을 분리하고, 선택한 서버의 도구를 노출하는 방식과 호출 승인·결과 처리를 정리했다.</p>
+<h2 id="section-2">1. 모델과 도구를 분리한 이유</h2>
+<p>모델마다 API 메시지와 tool call 형식이 다르다. 이 차이를 MCP 연결 로직에 직접 섞으면 모델을 바꿀 때 도구 호출과 대화 루프도 함께 수정해야 한다. 제공자 계층을 따로 두고 공통 메시지 형식으로 변환하는 구조를 문서화했다.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>구성 요소</th>
+<th>담당 역할</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>CLI·TUI</td>
+<td>사용자 입력, 연결·실행 상태, 스트리밍 표시</td>
+</tr>
+<tr>
+<td>공통 대화 엔진</td>
+<td>대화 기록, 도구 선택, 승인, 결과 반환</td>
+</tr>
+<tr>
+<td>LLM Provider</td>
+<td>Ollama·OpenAI-compatible 요청·응답을 공통 형식으로 변환</td>
+</tr>
+<tr>
+<td>MCP Client·Bridge</td>
+<td>서버 연결, 도구 스키마와 호출 전달</td>
+</tr>
+<tr>
+<td>실행 기록</td>
+<td>결과 상태, 증거 경로와 판단 근거 관리</td>
+</tr>
+</tbody></table></div>
+<p><img src="assets/ai-workbench-flow.svg" alt="LLM MCP 워크벤치 구조" loading="lazy"></p>
+<h2 id="section-3">2. 선택 서버의 도구 노출</h2>
+<p>서버 연결 상태와 모델에 노출하는 도구 묶음은 서로 다른 상태다. 연결된 모든 서버의 모든 도구를 항상 노출하기보다, 선택한 서버의 schema와 호출 경로를 연결하도록 구성 내용을 정리했다. 모델을 바꿔도 MCP 연결을 재사용하는 것이 구조의 핵심이다.</p>
+<pre><code class="language-text">사용자 입력 → 공통 대화 엔진
+  → 모델 제공자의 응답·tool call 해석
+  → 선택 서버의 도구와 인자 확인
+  → 실행 승인·범위 확인
+  → MCP 호출
+  → 결과를 공통 형식으로 반환
+</code></pre>
+<h2 id="section-4">3. 설정과 오류 처리 기록</h2>
+<p>Windows CP949 환경에서 한국어 로그·MCP 결과를 읽는 문제를 UTF-8 처리 기준으로 정리했다. 로컬 모델의 도구 호출 JSON에 문장이나 Markdown 코드 블록이 섞인 경우를 파서가 다루도록 보강한 기록도 있다. 도구 호출에 실패했을 때 모델의 설명만으로 성공을 처리하지 않도록 상태를 구분했다.</p>
+<h2 id="section-5">4. 문서에 남은 검증 기록</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>기록 기준</th>
+<th>문서 기록</th>
+<th>해석 범위</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2026.08.31</td>
+<td>테스트 25 pass·1 skip</td>
+<td>당시 환경의 기록이며 현재 재실행 결과가 아님</td>
+</tr>
+<tr>
+<td>같은 시점</td>
+<td>MCP 연결 5/8</td>
+<td>당시 연결 기록이며 최신 등록 MCP 전체의 성공 수가 아님</td>
+</tr>
+<tr>
+<td>2026.09.17</td>
+<td>기능별 라우팅·결과 정규화·Circuit Breaker 설명</td>
+<td>정적 확인 문서이며 현재 서버 상태를 새로 측정한 결과가 아님</td>
+</tr>
+</tbody></table></div>
+<p>9개 Capability, 11개 등록 MCP, 43개 참고 프로젝트는 서로 다른 분류다. 참고 카탈로그 수를 설치·통합 완료 수로 사용하지 않는다. Notion Bridge와 Token Tracker의 구성 골격도 자동 저장·비용 자동 집계의 완성을 의미하지 않는다.</p>
+<h2 id="section-6">5. 구성 경험에서 설명할 수 있는 점</h2>
+<p>모델 계층과 도구 계층의 책임을 나누고, 서버 선택·호출 승인·결과의 상태를 연결했다. 도구가 실행됐다는 사실과 분석 결과가 충분하다는 판단을 구분하는 흐름을 정리했다. 직접 작성·수정한 코드의 기여 범위와 현재 실행 로그는 문서 기록과 별도로 연결해야 한다.</p>
+<ul>
+<li><a href="viewer.html?file=reports/qwen-python-runtime.md">Python 런처와 공통 설정</a></li>
+<li><a href="viewer.html?file=reports/ai-execution-evidence.md">실행 상태·증거 관리</a></li>
+<li><a href="viewer.html?file=reports/claude-local-orchestration.md">Claude Hub와 로컬 LLM 구성</a></li>
+</ul>

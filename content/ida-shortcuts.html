@@ -1,0 +1,166 @@
+<h1 id="section-1">IDA Free / 바이너리 분석</h1>
+<p>이 문서는 내가 리버싱 solver와 BOF 분석을 하면서 IDA Free에서 반복해서 사용한 단축키와 분석 흐름을 정리한 치트시트다. 목표는 “문자열 → xref → 함수 → 조건문/입력 처리 → solver” 흐름을 빠르게 잡는 것이다.</p>
+<hr>
+<h2 id="section-2">1. 자주 쓰는 단축키</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>단축키</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>F5</code></td>
+<td>디컴파일 뷰</td>
+</tr>
+<tr>
+<td><code>Space</code></td>
+<td>그래프 뷰 / 텍스트 뷰 전환</td>
+</tr>
+<tr>
+<td><code>X</code></td>
+<td>xref 확인</td>
+</tr>
+<tr>
+<td><code>N</code></td>
+<td>이름 변경</td>
+</tr>
+<tr>
+<td><code>/</code></td>
+<td>인라인 주석</td>
+</tr>
+<tr>
+<td><code>;</code></td>
+<td>줄 주석</td>
+</tr>
+<tr>
+<td><code>G</code></td>
+<td>주소로 이동</td>
+</tr>
+<tr>
+<td><code>Ctrl+G</code></td>
+<td>점프</td>
+</tr>
+<tr>
+<td><code>Ctrl+W</code></td>
+<td>저장</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>이전 위치</td>
+</tr>
+<tr>
+<td><code>Tab</code></td>
+<td>디컴파일 / 어셈블리 전환</td>
+</tr>
+<tr>
+<td><code>Alt+T</code></td>
+<td>텍스트 검색</td>
+</tr>
+<tr>
+<td><code>Alt+B</code></td>
+<td>바이트 패턴 검색</td>
+</tr>
+<tr>
+<td><code>Shift+F12</code></td>
+<td>Strings 창</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h2 id="section-3">2. 기본 분석 루틴</h2>
+<pre><code class="language-text">1. 파일 로드 후 Auto Analysis 완료 대기
+2. Functions 창에서 main 찾기
+3. Strings 창에서 단서 문자열 확인
+4. xref로 문자열 사용 위치 추적
+5. F5로 디컴파일
+6. 입력 처리 함수 확인
+7. 비교/검증 로직 확인
+8. 필요한 상수, 테이블, XOR 값 추출
+9. Python solver로 재현
+</code></pre>
+<hr>
+<h2 id="section-4">3. 문자열 기반 추적</h2>
+<p>확인할 문자열:</p>
+<ul>
+<li><code>password</code></li>
+<li><code>admin</code></li>
+<li><code>correct</code></li>
+<li><code>wrong</code></li>
+<li><code>flag</code></li>
+<li><code>/bin/sh</code></li>
+<li>에러 메시지</li>
+<li>메뉴 문구</li>
+</ul>
+<p>왜 쓰는지:</p>
+<p>문자열은 검증 함수나 분기 조건으로 가는 가장 빠른 단서다. <code>Shift+F12</code>로 문자열을 찾고 <code>X</code>로 사용 위치를 따라간다.</p>
+<hr>
+<h2 id="section-5">4. 취약 함수 / 입력 함수</h2>
+<pre><code class="language-text">gets
+strcpy
+strcat
+sprintf
+scanf("%s")
+read
+recv
+strcmp
+memcmp
+</code></pre>
+<p>확인 포인트:</p>
+<ul>
+<li>버퍼 크기</li>
+<li>입력 길이 제한</li>
+<li>return address까지 거리</li>
+<li>비교 함수의 인자</li>
+<li>사용자 입력이 변환되는 과정</li>
+</ul>
+<hr>
+<h2 id="section-6">5. Solver 작성 흐름</h2>
+<pre><code class="language-text">검증 함수 찾기
+-&gt; 입력 길이 확인
+-&gt; 루프 조건 확인
+-&gt; XOR/add/sub/rotate/table lookup 확인
+-&gt; 상수와 테이블 추출
+-&gt; Python으로 같은 로직 구현
+-&gt; 역연산 가능 여부 확인
+-&gt; 정답 문자열 검증
+</code></pre>
+<p>예시 골격:</p>
+<pre><code class="language-python">target = [0x12, 0x34, 0x56]
+key = 0x41
+
+answer = []
+for value in target:
+    answer.append(value ^ key)
+
+print(bytes(answer))
+</code></pre>
+<p>주의점:</p>
+<ul>
+<li>디컴파일 결과가 항상 원본 의도를 정확히 보여주지는 않는다.</li>
+<li>헷갈리면 어셈블리 뷰와 GDB 동적 분석을 같이 본다.</li>
+</ul>
+<hr>
+<h2 id="section-7">6. BOF 분석에서 보는 것</h2>
+<pre><code class="language-text">입력 함수
+-&gt; 지역 변수 크기
+-&gt; saved RBP 위치
+-&gt; return address까지 거리
+-&gt; win/system 함수 존재 여부
+-&gt; checksec 결과와 연결
+</code></pre>
+<p>주의점:</p>
+<ul>
+<li>IDA의 <code>var_XX</code>는 스택 오프셋 힌트일 뿐이다.</li>
+<li>정확한 오프셋은 cyclic/GDB로 확인한다.</li>
+</ul>
+<hr>
+<h2 id="section-8">7. 기록 습관</h2>
+<p>보고서에는 다음을 남긴다.</p>
+<ul>
+<li>분석한 함수 이름</li>
+<li>문자열/xref 단서</li>
+<li>핵심 조건문</li>
+<li>입력 변환 로직</li>
+<li>solver 코드</li>
+<li>검증 결과</li>
+</ul>

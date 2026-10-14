@@ -1,0 +1,187 @@
+<h1 id="section-1">GDB / pwndbg</h1>
+<p>이 문서는 내가 BOF/ret2libc 실습을 하면서 GDB와 pwndbg에서 반복해서 사용한 명령어를 정리한 치트시트다. 단축키 암기보다 “크래시 확인 → 오프셋 계산 → 레지스터/스택 확인 → payload 수정” 흐름을 빠르게 반복하는 데 초점을 둔다.</p>
+<hr>
+<h2 id="section-2">1. 시작</h2>
+<pre><code class="language-bash">gdb ./binary
+gdb -q ./binary
+gdb --args ./binary arg1 arg2
+</code></pre>
+<pre><code class="language-gdb">set disassembly-flavor intel
+</code></pre>
+<p>왜 쓰는지:</p>
+<ul>
+<li><code>-q</code>: 배너 없이 빠르게 시작한다.</li>
+<li><code>--args</code>: 인자가 필요한 바이너리를 디버깅한다.</li>
+<li>Intel 문법은 IDA, pwndbg와 같이 보기 편하다.</li>
+</ul>
+<hr>
+<h2 id="section-3">2. 실행 제어</h2>
+<pre><code class="language-gdb">run
+run &lt; input.txt
+run &lt;&lt;&lt; $(python3 -c "print('A'*100)")
+continue
+next
+step
+ni
+si
+finish
+quit
+</code></pre>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>명령어</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>run</code></td>
+<td>처음부터 실행</td>
+</tr>
+<tr>
+<td><code>continue</code></td>
+<td>다음 breakpoint까지 진행</td>
+</tr>
+<tr>
+<td><code>next</code></td>
+<td>함수 안으로 들어가지 않고 다음 줄</td>
+</tr>
+<tr>
+<td><code>step</code></td>
+<td>함수 안으로 들어감</td>
+</tr>
+<tr>
+<td><code>ni</code></td>
+<td>다음 instruction</td>
+</tr>
+<tr>
+<td><code>si</code></td>
+<td>instruction 단위 step</td>
+</tr>
+<tr>
+<td><code>finish</code></td>
+<td>현재 함수가 끝날 때까지 실행</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h2 id="section-4">3. Breakpoint</h2>
+<pre><code class="language-gdb">break main
+break *0x401234
+tbreak *0x401234
+info breakpoints
+delete 1
+disable 1
+enable 1
+</code></pre>
+<p>왜 쓰는지:</p>
+<ul>
+<li>함수 이름, 주소, 특정 instruction 기준으로 멈춰서 입력 처리와 return 흐름을 본다.</li>
+<li><code>tbreak</code>는 한 번만 멈추는 breakpoint라 반복 디버깅 때 편하다.</li>
+</ul>
+<hr>
+<h2 id="section-5">4. 레지스터 / 스택 / 메모리</h2>
+<pre><code class="language-gdb">info registers
+p/x $rsp
+p/x $rip
+x/20gx $rsp
+x/40wx $rsp
+x/s 0xADDRESS
+x/i $rip
+context
+</code></pre>
+<p>확인 포인트:</p>
+<ul>
+<li><code>RIP</code>: 실행 흐름을 어디로 넘겼는지</li>
+<li><code>RSP</code>: payload가 스택에 어떻게 놓였는지</li>
+<li><code>RDI</code>, <code>RSI</code>, <code>RDX</code>: 함수 인자가 원하는 값인지</li>
+<li><code>x/s</code>: 문자열 주소가 맞는지</li>
+</ul>
+<hr>
+<h2 id="section-6">5. 크래시 / 오프셋</h2>
+<pre><code class="language-bash">pwn cyclic 200
+pwn cyclic -l VALUE
+</code></pre>
+<pre><code class="language-gdb">run &lt;&lt;&lt; $(pwn cyclic 200)
+info registers
+</code></pre>
+<p>왜 쓰는지:</p>
+<ul>
+<li>BOF에서 return address까지의 정확한 거리를 계산한다.</li>
+<li>pwndbg가 <code>cyclic -l</code> 힌트를 주는 경우도 있다.</li>
+</ul>
+<p>주의점:</p>
+<ul>
+<li>64-bit에서는 레지스터에 보이는 값의 바이트 순서를 확인한다.</li>
+<li>오프셋이 이상하면 입력 끝의 newline, null byte, 함수별 길이 제한을 확인한다.</li>
+</ul>
+<hr>
+<h2 id="section-7">6. pwndbg에서 자주 쓰는 명령</h2>
+<pre><code class="language-gdb">checksec
+vmmap
+plt
+got
+elf
+rop
+search /bin/sh
+nearpc
+telescope $rsp
+canary
+</code></pre>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>명령어</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>checksec</code></td>
+<td>보호기법 확인</td>
+</tr>
+<tr>
+<td><code>vmmap</code></td>
+<td>메모리 매핑과 base 주소 확인</td>
+</tr>
+<tr>
+<td><code>plt</code>, <code>got</code></td>
+<td>함수 호출/주소 테이블 확인</td>
+</tr>
+<tr>
+<td><code>rop</code></td>
+<td>gadget 탐색</td>
+</tr>
+<tr>
+<td><code>search /bin/sh</code></td>
+<td>문자열 위치 찾기</td>
+</tr>
+<tr>
+<td><code>telescope $rsp</code></td>
+<td>스택을 포인터 형태로 보기</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h2 id="section-8">7. ret2libc 확인 루틴</h2>
+<pre><code class="language-text">1. 오프셋 계산
+2. pop rdi; ret gadget 확인
+3. puts@plt로 puts@got leak
+4. libc base 계산
+5. system("/bin/sh") payload 구성
+6. 로컬 재현
+7. 원격 환경 차이 확인
+</code></pre>
+<p>주의점:</p>
+<ul>
+<li><code>ret</code> gadget을 하나 추가해야 stack alignment 문제가 해결되는 경우가 있다.</li>
+<li>원격 libc가 다르면 로컬 exploit이 실패할 수 있다.</li>
+</ul>
+<hr>
+<h2 id="section-9">8. 기록 습관</h2>
+<p>보고서에는 다음을 남긴다.</p>
+<ul>
+<li>크래시 입력</li>
+<li>오프셋 계산 근거</li>
+<li>보호기법</li>
+<li>leak한 주소와 base 계산</li>
+<li>gadget과 payload 구조</li>
+<li>최종 shell 또는 flag 재현 화면</li>
+</ul>

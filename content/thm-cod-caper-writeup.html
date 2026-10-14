@@ -1,0 +1,144 @@
+<h1 id="section-1">THM The Cod Caper 분석 - SQLi SSH와 로컬 바이너리</h1>
+<h2 id="section-2">1. 개요</h2>
+<p>The Cod Caper는 웹 취약점, 리눅스 내부 정찰, 기초 BOF가 하나의 흐름으로 이어지는 TryHackMe 실습이다. 단일 취약점 하나만 보는 문제가 아니라, 웹 로그인 폼에서 시작해 서버 내부 접근과 로컬 권한 상승까지 연결해야 했다.</p>
+<p>전체 흐름은 다음과 같이 정리할 수 있다.</p>
+<pre><code class="language-text">관리자 로그인 페이지 발견
+-&gt; SQL Injection 가능성 확인
+-&gt; sqlmap으로 DB 구조와 계정 정보 확인
+-&gt; SSH 접속 및 키/권한 확인
+-&gt; 숨겨진 pass 파일 탐색
+-&gt; root 권한으로 실행되는 BOF 바이너리 분석
+-&gt; RET 주소를 기존 shell 함수로 덮어쓰기
+-&gt; 해시/비밀번호 복구로 결과 확인
+</code></pre>
+<p>이 라이트업은 플래그 자체보다 “어떤 단서를 보고 다음 단계로 넘어갔는지”를 설명하는 데 초점을 맞췄다. 모든 실습은 허가된 THM 랩 환경에서 진행했다.</p>
+<h2 id="section-3">2. 대상 / 환경</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>플랫폼</td>
+<td>TryHackMe 실습 랩</td>
+</tr>
+<tr>
+<td>주요 영역</td>
+<td>Web, Linux Enumeration, BOF</td>
+</tr>
+<tr>
+<td>사용 도구</td>
+<td>브라우저, Burp/HTTP 확인, sqlmap, SSH, GDB, readelf, Python, John</td>
+</tr>
+<tr>
+<td>취약 유형</td>
+<td>SQL Injection, 계정 정보 노출, Stack Buffer Overflow</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-4">3. 초기 웹 진입점</h2>
+<p>웹 디렉터리 정찰 과정에서 관리자 로그인 페이지를 확인했다. 여기서 중요한 점은 “로그인 페이지가 있다”가 아니라, 로그인 요청이 SQLi를 검증할 수 있는 명확한 입력 지점이라는 것이다.</p>
+<p><img src="assets/reports/thm-cod-caper/01-admin-login.jpg" alt="관리자 로그인 페이지" loading="lazy"></p>
+<p>먼저 작은따옴표와 기본적인 로그인 우회 payload로 응답 차이를 확인했다. 입력값에 따라 서버 응답이 달라지는 것을 보고 SQLi 가능성이 있다고 판단했고, 이후에는 sqlmap으로 구조화된 추출을 진행했다.</p>
+<h2 id="section-5">4. SQL Injection 검증 및 DB 추출</h2>
+<p>로그인 요청은 POST 방식으로 <code>username</code>, <code>password</code> 값을 전달했다. 수동 확인 후 sqlmap으로 대상 URL과 form body를 지정해 DB 구조를 확인했다.</p>
+<pre><code class="language-bash">sqlmap -u http://&lt;LAB_IP&gt;/administrator.php --forms
+sqlmap -u http://&lt;LAB_IP&gt;/administrator.php --data "username=&amp;password=" --dbs
+sqlmap -u http://&lt;LAB_IP&gt;/administrator.php --data "username=&amp;password=" -D users --tables
+sqlmap -u http://&lt;LAB_IP&gt;/administrator.php --data "username=&amp;password=" -D users -T users --dump
+</code></pre>
+<p>DB enumeration 결과를 통해 백엔드 쿼리가 injectable하고, 애플리케이션 DB에서 사용자 정보를 추출할 수 있음을 확인했다.</p>
+<p><img src="assets/reports/thm-cod-caper/02-sqlmap-dbs.jpg" alt="sqlmap DB enumeration 결과" loading="lazy"></p>
+<p>이 단계에서 정리한 재사용 가능한 루틴은 다음과 같다.</p>
+<pre><code class="language-text">폼 발견
+-&gt; 요청 방식과 파라미터 확인
+-&gt; 최소 payload로 수동 테스트
+-&gt; 성공/실패 응답 차이 비교
+-&gt; 요청 구조를 이해한 뒤 sqlmap으로 보조 검증
+</code></pre>
+<h2 id="section-6">5. SSH 접근 및 내부 파일 탐색</h2>
+<p>웹 취약점으로 확보한 계정 정보가 SSH에도 재사용되는지 확인했다. SSH 키를 사용할 수 있는 경우에는 권한이 너무 넓게 설정되어 있지 않은지, 실제로 해당 키로 접속 가능한지 확인해야 한다.</p>
+<p><img src="assets/reports/thm-cod-caper/03-ssh-key-check.jpg" alt="SSH 키 권한 확인" loading="lazy"></p>
+<p>서버 내부에 들어간 뒤에는 로컬 정찰을 진행했다. 일반적인 사용자 경로에 보이지 않는 pass 파일이 있었기 때문에 파일시스템을 직접 검색했다.</p>
+<pre><code class="language-bash">find / -name pass 2&gt;/dev/null
+</code></pre>
+<p><img src="assets/reports/thm-cod-caper/04-pass-file.jpg" alt="숨겨진 pass 파일 탐색" loading="lazy"></p>
+<h2 id="section-7">6. BOF 후보 바이너리 분석</h2>
+<p>권한 상승 경로는 표준 입력의 영향을 받는 바이너리에서 시작됐다. 취약 함수는 고정 크기의 stack buffer를 사용하면서 입력 길이를 안전하게 제한하지 않았다.</p>
+<p>분석에서 가장 먼저 답해야 할 질문은 이것이었다.</p>
+<pre><code class="language-text">사용자 입력이 RET 주소에 도달하려면 몇 바이트가 필요한가?
+</code></pre>
+<p>32-bit 구조에서 확인한 레이아웃은 다음과 같았다.</p>
+<pre><code class="language-text">buffer: 40 bytes
+saved frame pointer: 4 bytes
+RET overwrite 시작 위치: 44 bytes 이후
+</code></pre>
+<p><img src="assets/reports/thm-cod-caper/05-get-input-disasm.jpg" alt="get_input 함수 C 소스" loading="lazy"></p>
+<p>재현 시 충분히 긴 입력과 레지스터 값을 이용해 RET 오프셋을 별도로 측정해야 한다. 현재 다음 캡처는 disassembly이며, 실제 크래시·cyclic 오프셋 검증의 증거와 구분한다.</p>
+<p><img src="assets/reports/thm-cod-caper/06-crash-test.jpg" alt="바이너리 disassembly 크래시 결과와 구분" loading="lazy"></p>
+<h2 id="section-8">7. RET overwrite 전략</h2>
+<p>RET 오프셋이 별도 검증되면 바이너리 안에 이미 존재하는 유용한 함수를 후속 대상으로 검토한다. 이 문제에서는 shell 관련 동작을 수행하는 함수가 있었기 때문에 shellcode를 직접 주입하기보다, RET를 해당 함수 주소로 덮어쓰는 방식이 더 단순했다.</p>
+<p><img src="assets/reports/thm-cod-caper/07-shell-disasm.jpg" alt="shell 함수 disassembly" loading="lazy"></p>
+<p>payload 구조는 다음과 같다.</p>
+<pre><code class="language-text">"A" * 44 + target_function_address
+</code></pre>
+<p>예시 구조:</p>
+<pre><code class="language-bash">python -c 'print "A"*44 + "\xcb\x84\x04\x08"' | ./root
+</code></pre>
+<p>함수 주소는 랩 인스턴스나 바이너리 빌드 상태에 따라 달라질 수 있으므로, 재현할 때는 <code>readelf</code>, <code>objdump</code>, GDB로 다시 확인해야 한다.</p>
+<h2 id="section-9">8. 결과 확인</h2>
+<p>보유한 계정 분석 자료에는 John으로 비밀번호를 복원한 결과가 남아 있다. 이 결과는 BOF 크래시·오프셋 검증 및 전체 체인 완료와 분리해 기록한다.</p>
+<p><img src="assets/reports/thm-cod-caper/08-john-result.jpg" alt="John 크랙 결과" loading="lazy"></p>
+<p>이 문제의 핵심은 취약점 하나를 크게 과장하는 것이 아니라, 작은 단서들이 어떻게 다음 단계로 이어지는지 설명하는 것이다.</p>
+<ul>
+<li>웹 로그인 입력이 SQL 문법으로 해석됐다.</li>
+<li>DB 데이터가 서버 계정 접근으로 이어졌다.</li>
+<li>로컬 정찰에서 권한 상승 후보 바이너리를 찾았다.</li>
+<li>C 소스와 GDB disassembly를 확인하고 제어 흐름 변조의 후속 검증 항목을 정리했다.</li>
+</ul>
+<h2 id="section-10">9. 영향도</h2>
+<p>실제 환경이라면 웹 로그인 취약점이 서버 내부 접근과 권한 상승으로 이어지는 고위험 체인이다. 전체 체인이 성공하면 민감 파일, 계정 정보, 서버 관리자 권한까지 노출될 수 있다.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>구분</th>
+<th>영향</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>웹</td>
+<td>SQLi로 DB 사용자 정보 추출 가능</td>
+</tr>
+<tr>
+<td>계정</td>
+<td>웹 계정과 OS 계정 재사용 시 SSH 접근 가능</td>
+</tr>
+<tr>
+<td>서버 내부</td>
+<td>숨겨진 파일, 권한 상승 바이너리 노출</td>
+</tr>
+<tr>
+<td>권한 상승</td>
+<td>BOF를 이용해 root 권한 동작 호출 가능</td>
+</tr>
+<tr>
+<td>최종 영향</td>
+<td>서버 장악, 민감정보 탈취, 추가 내부 이동 가능</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-11">10. 대응 방안</h2>
+<ul>
+<li>인증 쿼리는 Prepared Statement로 작성한다.</li>
+<li>웹 애플리케이션 DB에 재사용 가능한 OS 계정을 저장하지 않는다.</li>
+<li>웹 계정과 시스템 계정의 비밀번호를 분리한다.</li>
+<li>SSH private key는 노출 경로에 두지 않고 권한을 엄격히 제한한다.</li>
+<li>SUID/root helper 바이너리는 꼭 필요한 경우에만 둔다.</li>
+<li>입력 함수는 길이 제한이 있는 안전한 함수로 교체한다.</li>
+<li>Canary, PIE, NX, Full RELRO 같은 보호 기법을 적용한다.</li>
+</ul>
+<h2 id="section-12">11. 학습한 점</h2>
+<p>이 실습은 웹 해킹과 시스템 해킹을 따로 보지 않고 하나의 공격 경로로 연결해보는 데 의미가 있었다. 포트폴리오에서 보여주고 싶은 핵심은 다음 흐름이다.</p>
+<pre><code class="language-text">HTTP 요청 분석 -&gt; SQLi 검증 -&gt; 계정 재사용 확인 -&gt; 로컬 정찰 -&gt; 바이너리 분석 -&gt; exploit 작성
+</code></pre>
+<p>각 단계는 앞 단계의 결과를 근거로 진행되어야 한다. 캡처도 단순 인증샷이 아니라, “왜 다음 단계로 넘어갈 수 있었는지”를 증명하는 자료로 배치하는 것이 중요하다고 느꼈다.</p>

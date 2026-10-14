@@ -1,0 +1,292 @@
+<h1 id="section-1">강문식 보안 포트폴리오</h1>
+<p>배포 URL: <a href="https://kang9863.github.io/security-portfolio/" target="_blank" rel="noopener noreferrer">https://kang9863.github.io/security-portfolio/</a></p>
+<p>여러 회사의 모의해킹·취약점 분석 직무 지원에 사용할 수 있는 보안 학습 포트폴리오입니다. 웹 취약점 보고서와 모바일 분석을 중심에 두고, AD, 시스템 해킹, 리버싱, 탐지, AI/MCP 워크플로우를 보조 역량으로 정리했습니다.</p>
+<p>이 포트폴리오는 실제 서비스 공격 자료가 아니라, 허가된 CTF/실습 환경과 개인 학습 노트를 공개 가능한 보고서 형식으로 다시 정리한 결과물입니다. 비밀번호, 해시, 토큰, flag, 실제 서비스 식별자는 공개하지 않습니다.</p>
+<hr>
+<h2 id="section-2">구성</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>경로</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>index.html</code></td>
+<td>포트폴리오 메인 페이지</td>
+</tr>
+<tr>
+<td><code>viewer.html</code></td>
+<td>Markdown 문서 뷰어</td>
+</tr>
+<tr>
+<td><code>assets/kang-munsik-resume.pdf</code></td>
+<td>공통 지원용 이력서 PDF</td>
+</tr>
+<tr>
+<td><code>catalog.json</code></td>
+<td>전체 문서 제목·분류·검색 메타데이터</td>
+</tr>
+<tr>
+<td><code>content/</code></td>
+<td>본문 HTML 문서와 목차 뷰어 입력</td>
+</tr>
+<tr>
+<td><code>reports/</code></td>
+<td>보고서와 라이트업</td>
+</tr>
+<tr>
+<td><code>cheatsheets/</code></td>
+<td>실습 중 사용한 명령어와 체크리스트</td>
+</tr>
+<tr>
+<td><code>assets/</code></td>
+<td>보고서 캡처 이미지</td>
+</tr>
+<tr>
+<td><code>SECURITY.md</code></td>
+<td>실습 범위와 윤리 기준</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h2 id="section-3">대표 검토 순서</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>순서</th>
+<th>문서</th>
+<th>보여주는 역량</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td><a href="viewer.html?file=reports/sql-injection-report-sample.md">SQL Injection 보고서</a></td>
+<td>입력값, SQL 문맥, 수동 검증, 대응 방안</td>
+</tr>
+<tr>
+<td>2</td>
+<td><a href="viewer.html?file=reports/xss-report-sample.md">XSS 보고서</a></td>
+<td>Reflected/Stored/DOM XSS 문맥 분석</td>
+</tr>
+<tr>
+<td>3</td>
+<td><a href="viewer.html?file=reports/mobile-hacking-writeup.md">모바일 앱 보안 분석</a></td>
+<td>jadx-gui, Frida, 루팅 탐지 우회, secret 분석</td>
+</tr>
+<tr>
+<td>4</td>
+<td><a href="viewer.html?file=reports/thm-cod-caper-writeup.md">THM The Cod Caper</a></td>
+<td>SQLi, SSH key, BOF로 이어지는 체인형 풀이</td>
+</tr>
+<tr>
+<td>5</td>
+<td><a href="viewer.html?file=reports/htb-search-writeup.md">HTB Search</a></td>
+<td>Kerberoast, Password Spray, PFX/PSWA, gMSA</td>
+</tr>
+<tr>
+<td>6</td>
+<td><a href="viewer.html?file=reports/htb-forest-writeup.md">HTB Forest</a></td>
+<td>Anonymous LDAP, AS-REP, WriteDACL, DCSync</td>
+</tr>
+<tr>
+<td>7</td>
+<td><a href="viewer.html?file=reports/reversing-solver-writeup.md">리버싱 Solver 정리</a></td>
+<td>IDA 분석과 Python solver 재구현</td>
+</tr>
+<tr>
+<td>8</td>
+<td><a href="viewer.html?file=reports/b-track-learning-map.md">B트랙 학습 맵</a></td>
+<td>노말틱, 레드라쿤, THM, HTB, PortSwigger 학습 연결</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h2 id="section-4">보고서 목록</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>보고서</th>
+<th>핵심 내용</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><a href="viewer.html?file=reports/auth-login-logic-analysis.md">인증/로그인 로직 분석</a></td>
+<td>식별/인증, Hash, Salt, 세션, JWT</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/sql-injection-report-sample.md">SQL Injection</a></td>
+<td>Login Bypass, Error-Based SQLi, sqlmap 보조 검증</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/cve-2021-41773-path-traversal.md">CVE-2021-41773</a></td>
+<td>Apache Path Traversal, URL path 처리 문제</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/recon-ad-attack-path.md">Recon and AD Attack Path</a></td>
+<td>Nmap, SMB, LDAP, Kerberos, BloodHound</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/system-hacking-writeup.md">BOF02 ret2libc</a></td>
+<td>Stack BOF, libc leak, ret2libc</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/bof01-writeup.md">BOF01</a></td>
+<td>offset 계산, RET overwrite, ret2win 기본</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/bof11-ida-gdb-writeup.md">BOF11</a></td>
+<td>IDA 정적 분석, GDB offset 검증</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/thm-cod-caper-writeup.md">THM The Cod Caper</a></td>
+<td>SQLi, SSH key, BOF, John</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/xss-report-sample.md">XSS</a></td>
+<td>Reflected, Stored, DOM XSS</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/htb-blue-writeup.md">THM Blue</a></td>
+<td>MS17-010, EternalBlue, SYSTEM</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/thm-ice-windows-privesc.md">THM ICE</a></td>
+<td>UAC Bypass, migrate, kiwi, credential dump</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/htb-forest-writeup.md">HTB Forest</a></td>
+<td>AS-REP Roasting, WriteDACL, DCSync</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/dreamhack-xss-writeup.md">DreamHack XSS</a></td>
+<td>xss-1/2, 필터 우회, CSRF, admin bot</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/htb-spookifier-ssti.md">HTB Spookifier</a></td>
+<td>Flask/Mako SSTI, template expression execution</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/htb-search-writeup.md">HTB Search</a></td>
+<td>Kerberoast, Password Spray, PFX/PSWA, gMSA</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/dreamhack-dream-casino.md">DreamHack Dream Casino</a></td>
+<td>MT19937 난수 예측</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/reversing-solver-writeup.md">Reversing Solver</a></td>
+<td>IDA, XOR, S-box, Python solver</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/mobile-hacking-writeup.md">Mobile App Security</a></td>
+<td>jadx-gui, Frida, UnCrackable, AndroGoat</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/nessus-ids-practice.md">Nessus / IDS</a></td>
+<td>Nessus, Snort, Suricata, YARA, Sigma</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/windows-lpe-topic1.md">Windows LPE</a></td>
+<td>Access Token, Integrity Level, UAC, 서비스 권한</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/thm-linux-privesc-review.md">THM Linux 권한 상승 복습</a></td>
+<td>Bounty Hacker, LazyAdmin, RootMe</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/web-fuzzing-xss-review-notes.md">웹 퍼징/XSS/IDOR 복습</a></td>
+<td>ffuf, gobuster, vHost, XSS 재현, IDOR</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/ai-mcp-bughunting-workflow.md">AI/MCP Workflow</a></td>
+<td>HexStrike, MCP, Codex/Cursor, OSINT self-audit</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/b-track-learning-map.md">B트랙 학습 맵</a></td>
+<td>전체 학습 축과 포트폴리오 연결</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=reports/kisa-training-certificates.md">KISA 수료 내역</a></td>
+<td>KISA아카데미 교육 이수 내용</td>
+</tr>
+<tr>
+<td><a href="viewer.html?file=SECURITY.md">실습 범위와 보안 원칙</a></td>
+<td>공개 범위, 마스킹 기준, 윤리 원칙</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h2 id="section-5">치트시트</h2>
+<ul>
+<li><a href="viewer.html?file=cheatsheets/field-cheatsheet.md">실전 사용 치트시트</a></li>
+<li><a href="viewer.html?file=cheatsheets/web-pentest-checklist.md">Web Pentest Checklist</a></li>
+<li><a href="viewer.html?file=cheatsheets/web-pentest-commands.md">Web Pentest Commands</a></li>
+<li><a href="viewer.html?file=cheatsheets/nmap-commands.md">Nmap Commands</a></li>
+<li><a href="viewer.html?file=cheatsheets/pwn-checklist.md">Pwn Checklist</a></li>
+<li><a href="viewer.html?file=cheatsheets/gdb-pwndbg.md">GDB / pwndbg</a></li>
+<li><a href="viewer.html?file=cheatsheets/ida-shortcuts.md">IDA Free / 바이너리 분석</a></li>
+</ul>
+<hr>
+<h2 id="section-6">완료된 작업</h2>
+<ul>
+<li><input type="checkbox" disabled="disabled" checked="checked"> GitHub Pages 배포</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> Markdown 뷰어 구현</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> 보고서 검색/태그 필터/9개 단위 페이지 전환</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> 모바일 레이아웃 정리</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> 뷰어 목차 접기/펼치기</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> SQLi, XSS, 로그인 로직, 모바일 보고서 작성</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> THM Blue, Forest, Search 보강</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> THM The Cod Caper, THM ICE, THM Linux 복습 문서화</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> BOF01, BOF11, Reversing Solver 정리</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> Nessus/IDS, Windows LPE, AI/MCP 워크플로우 정리</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> KISA아카데미 수료 내역 정리</li>
+<li><input type="checkbox" disabled="disabled" checked="checked"> 깨진 한글 문서 복구</li>
+</ul>
+<hr>
+<h2 id="section-7">남은 보완 후보</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>후보</th>
+<th>현재 기준</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>HTB Cap</td>
+<td>전용 풀이 노트나 캡처 확보 후 작성</td>
+</tr>
+<tr>
+<td>HTB Meow</td>
+<td>전용 풀이 노트나 캡처 확보 후 작성</td>
+</tr>
+<tr>
+<td>HTB Expressway</td>
+<td>전용 풀이 노트나 캡처 확보 후 작성</td>
+</tr>
+<tr>
+<td>모바일 캡처 추가</td>
+<td>secret/log 마스킹 가능한 이미지 확보 후 반영</td>
+</tr>
+<tr>
+<td>탐지 룰 실습 강화</td>
+<td>pcap 기반 alert 결과가 있으면 Nessus/IDS 문서 보강</td>
+</tr>
+</tbody></table></div>
+<p>근거가 부족한 문서는 이름만 보고 억지로 작성하지 않고, 실제 풀이 기록이 확인될 때 추가합니다.</p>
+<hr>
+<h2 id="section-8">GitHub 정보</h2>
+<ul>
+<li>Repo: <a href="https://github.com/kang9863/security-portfolio" target="_blank" rel="noopener noreferrer">https://github.com/kang9863/security-portfolio</a></li>
+<li>Pages: <a href="https://kang9863.github.io/security-portfolio/" target="_blank" rel="noopener noreferrer">https://kang9863.github.io/security-portfolio/</a></li>
+<li>Branch: <code>main</code></li>
+</ul>
+<h2 id="section-9">최근 AI 구성과 팀 프로젝트</h2>
+<p>기존 공개 문서 34개에 AI와 팀 프로젝트 기록 8개를 추가했다. 현재 전체는 보고서·학습 기록 33개, 치트시트 7개, 안내 문서 2개로 총 42개다. 문서 수는 독립 프로젝트나 취약점 발견 수를 의미하지 않는다.</p>
+<ul>
+<li><a href="viewer.html?file=reports/juice-shop-team-project.md">OWASP Juice Shop 팀 프로젝트와 AI 도구 활용</a></li>
+<li><a href="viewer.html?file=reports/multi-llm-mcp-workbench.md">Multi LLM MCP 분석 워크벤치 구성</a></li>
+<li><a href="viewer.html?file=reports/qwen-python-runtime.md">Qwen Python 런처와 공통 실행 설정</a></li>
+<li><a href="viewer.html?file=reports/claude-local-orchestration.md">Claude Hub와 로컬 LLM 보안 분석 구성</a></li>
+<li><a href="viewer.html?file=reports/ai-execution-evidence.md">AI 도구의 실행 상태와 증거 관리</a></li>
+<li><a href="viewer.html?file=reports/ai-role-orchestration-design.md">AI 역할 분담과 검토 흐름 설계</a></li>
+<li><a href="viewer.html?file=reports/ai-quant-orchestrator-design.md">AI 퀀트 오케스트레이터 구조 설계</a></li>
+<li><a href="viewer.html?file=reports/ai-assisted-portfolio-workflow.md">AI를 활용한 자료 통합과 포트폴리오 제작</a></li>
+</ul>
