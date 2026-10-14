@@ -41,9 +41,9 @@ function decorate(){
 }
 async function load(){
  try{
-  const c=await fetch('catalog.json?v=20261014-library-1');if(!c.ok)throw Error();catalog=(await c.json()).docs;
+  const c=await fetch('catalog.json?v=20261014-library-2');if(!c.ok)throw Error();catalog=(await c.json()).docs;
   currentDoc=catalog.find(doc=>doc.file===file);if(!currentDoc)throw Error();renderNav();
-  const response=await fetch(currentDoc.content+'?v=20261014-library-1');if(!response.ok)throw Error();
+  const response=await fetch(currentDoc.content+'?v=20261014-library-2');if(!response.ok)throw Error();
   // Only pre-rendered, build-sanitized content from the fixed catalog can be inserted.
   docContent.innerHTML=await response.text();
   document.title=currentDoc.title+' | 강문식';
@@ -51,7 +51,7 @@ async function load(){
   document.querySelector('#reader-time').textContent='약 '+currentDoc.minutes+'분 읽기';
   document.querySelector('#reader-origin').textContent=currentDoc.origin;
   const note=document.querySelector('#reader-note');note.hidden=!currentDoc.note;note.textContent=currentDoc.note;
-  const raw=document.querySelector('#markdown-source');raw.href=currentDoc.file+'?v=20261014-library-1';
+  const raw=document.querySelector('#markdown-source');raw.href=currentDoc.file+'?v=20261014-library-2';
   document.querySelector('#current-document-title').textContent=currentDoc.title;
   buildToc();decorate();
   const related=catalog.filter(doc=>doc.type===currentDoc.type&&doc.tags.some(tag=>currentDoc.tags.includes(tag)));

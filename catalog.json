@@ -274,7 +274,7 @@
       "id": "ai-assisted-portfolio-workflow",
       "file": "reports/ai-assisted-portfolio-workflow.md",
       "title": "AI를 활용한 자료 통합과 포트폴리오 제작",
-      "summary": "AI와 자료를 대조해 근거 데이터, Word·PDF와 GitHub Pages로 연결한 제작 경험입니다.",
+      "summary": "AI와 자료를 대조해 근거 데이터, 상세 분석 문서와 GitHub Pages로 연결한 제작 경험입니다.",
       "type": "report",
       "tags": [
         "ai"
@@ -283,14 +283,14 @@
       "note": "",
       "headings": [
         "1. 자료 통합",
-        "2. 이력서 표현을 검토한 사례",
+        "2. 분석 결과 표현을 검토한 사례",
         "3. 문서와 웹 산출물",
         "4. AI와 사용자의 역할",
         "5. 공개 결과의 확인"
       ],
       "minutes": 2,
       "content": "content/ai-assisted-portfolio-workflow.html",
-      "keywords": " 1. 자료 통합 2. 이력서 표현을 검토한 사례 3. 문서와 웹 산출물 4. AI와 사용자의 역할 5. 공개 결과의 확인",
+      "keywords": " 1. 자료 통합 2. 분석 결과 표현을 검토한 사례 3. 문서와 웹 산출물 4. AI와 사용자의 역할 5. 공개 결과의 확인",
       "origin": "기존 정리 자료와 최근 작업 기록"
     },
     {

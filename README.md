@@ -14,7 +14,6 @@
 | --- | --- |
 | `index.html` | 포트폴리오 메인 페이지 |
 | `viewer.html` | Markdown 문서 뷰어 |
-| `assets/kang-munsik-resume.pdf` | 공통 지원용 이력서 PDF |
 | `catalog.json` | 전체 문서 제목·분류·검색 메타데이터 |
 | `content/` | 본문 HTML 문서와 목차 뷰어 입력 |
 | `reports/` | 보고서와 라이트업 |
